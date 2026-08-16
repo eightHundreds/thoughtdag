@@ -88,6 +88,11 @@ const nodeTypes = { thought: NodeDispatch };
 // Overrides the built-in smoothstep so persisted edges need no migration
 const edgeTypes = { smoothstep: ThoughtEdgeView };
 
+// Two-finger trackpad swipe is a wheel event. On Mac we pan with it and
+// keep pinch-to-zoom (Safari/Chrome set ctrlKey on pinch). Other platforms
+// keep the mouse-wheel zoom default.
+const isMacTrackpad = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
+
 // Gate on rehydration: the store loads asynchronously from IndexedDB, and
 // mounting the canvas only after hydration lets ReactFlow's fitView see the
 // restored graph (and avoids flashing the landing input).
@@ -985,10 +990,15 @@ function Canvas() {
         nodeDragThreshold={5}
         connectionRadius={40}
         selectionMode={SelectionMode.Partial}
+        // macOS trackpad: two-finger swipe pans (pinch still zooms);
+        // three-finger drag is an OS mouse-drag, so left-drag marquees.
         selectionOnDrag={!isViewerMode}
         nodesDraggable={!isViewerMode}
         nodesConnectable={!isViewerMode}
         panOnDrag={isViewerMode ? true : [1, 2]}
+        panOnScroll={isMacTrackpad}
+        zoomOnScroll={!isMacTrackpad}
+        zoomOnPinch
         zoomOnDoubleClick={false}
         connectionLineStyle={{ stroke: COLORS.accent, strokeDasharray: '8 4', strokeWidth: 2 }}
         onSelectionChange={onSelectionChange}
