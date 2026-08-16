@@ -2,6 +2,7 @@
   "name": "thoughtdag-sync",
   "main": "src/index.js",
   "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
   "r2_buckets": [
     {
       "binding": "BUCKET",

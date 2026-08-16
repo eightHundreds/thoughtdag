@@ -1,18 +1,12 @@
-// ThoughtDAG sync vault — a dumb authenticated object store on R2.
+// ThoughtDAG hosted backend: the demo LLM proxy PLUS an R2 sync vault.
 //
-// The worker never inspects object bodies. Clients encrypt before PUT.
-// The Bearer token IS the vault name (usually a hash of what the user
-// typed in the app). Each distinct token is its own R2 prefix. There is
-// no server-side password: knowing the URL + name is enough to read and
-// write that namespace.
+//   /api/*     — same stateless BYOK proxy as app.thoughtdag.workers.dev
+//                (probe models, stream, scholar search, link snapshots).
+//   /v1/*      — encrypted object store. The Bearer token IS the vault
+//                name; each distinct token is its own R2 prefix.
 //
-// Routes:
-//   GET  /v1/health
-//   GET  /v1/objects
-//   GET  /v1/objects/:key
-//   HEAD /v1/objects/:key
-//   PUT  /v1/objects/:key
-//   DELETE /v1/objects/:key
+// The worker never inspects vault bodies. Clients encrypt before PUT.
+import { onRequest } from '../../../functions/api/[[path]].js';
 
 const NS_PREFIX = 'thoughtdag-sync-ns-v1:';
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -24,6 +18,11 @@ export default {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders(request) });
+    }
+    if (url.pathname.startsWith('/api/')) {
+      const path = url.pathname.slice('/api/'.length);
+      const res = await onRequest({ request, params: { path: path.split('/') }, env });
+      return withCors(request, res);
     }
     try {
       return await handle(request, env, url);
@@ -178,7 +177,7 @@ function corsHeaders(request) {
   const origin = request.headers.get('Origin') || '*';
   return {
     'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'GET, PUT, DELETE, HEAD, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, HEAD, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, If-None-Match, X-Object-Name, X-Object-Updated-At, X-Object-Hash, X-Object-Kind',
     'Access-Control-Expose-Headers': 'ETag, Last-Modified, X-Object-Name, X-Object-Updated-At, X-Object-Hash, X-Object-Kind',
     'Access-Control-Max-Age': '86400',
@@ -191,6 +190,14 @@ function json(request, body, status = 200) {
     status,
     headers: { ...corsHeaders(request), 'Content-Type': 'application/json' },
   });
+}
+
+function withCors(request, res) {
+  const headers = new Headers(res.headers);
+  for (const [k, v] of Object.entries(corsHeaders(request))) {
+    if (v) headers.set(k, v);
+  }
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
 function stripEtag(etag) {

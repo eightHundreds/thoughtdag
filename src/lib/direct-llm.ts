@@ -1,6 +1,6 @@
 import type { ContextMessage, ImageAttachment, StreamCallbacks } from './api';
 import type { Reference } from '../types';
-import { API_BASE } from './constants';
+import { isHostedProxy } from './constants';
 import { storedProviders, type RuntimeProvider } from './runtime-providers';
 
 // Direct browser→gateway streaming. On the Workers deployment the proxy has
@@ -17,8 +17,7 @@ import { storedProviders, type RuntimeProvider } from './runtime-providers';
 // the full tool loop (search / scholar / MCP / vision reroute) — bypassing it
 // would throw all of that away for nothing. Only the hosted deployment needs
 // the direct lanes.
-const isLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-const isWorkerBackend = API_BASE === '' && !isLoopback;
+const isWorkerBackend = isHostedProxy();
 
 // Endpoints verified to allow browser CORS: OpenRouter (documented),
 // Moonshot (preflight tested against .cn with the app origin), and DeepSeek

@@ -34,9 +34,11 @@ extraction needs the local proxy's poppler).
 
 ## Optional: remote canvas sync (Worker + R2)
 
-A separate Worker stores encrypted snapshots so two browsers can share
-canvases without an account. The user pastes the Worker URL and invents
-a storage-area name; the same pair on another computer is the same vault.
+This fork's Worker (`thoughtdag-sync`) is both the demo LLM proxy
+(`/api/*`, same contract as `app.thoughtdag.workers.dev`) and an R2
+vault (`/v1/*`). GitHub Pages has no `/api` of its own, so the Pages
+build talks to that Worker. The user still pastes the Worker URL and
+invents a storage-area name for canvas sync.
 
 See `workers/sync/README.md` for `wrangler` setup.
 

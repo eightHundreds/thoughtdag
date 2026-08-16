@@ -37,6 +37,7 @@ jobs:
         run: npm run build
         env:
           VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_API_BASE: https://thoughtdag-sync.mingoing9610.workers.dev
 
       - name: Add story site and SPA fallback
         run: |

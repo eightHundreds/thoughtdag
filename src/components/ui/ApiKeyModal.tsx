@@ -9,7 +9,7 @@ import {
   probeModels, pushProviders, saveProviders, storedProviders,
 } from '../../lib/runtime-providers';
 import { useT, fmt, useI18n } from '../../i18n';
-import { API_BASE } from '../../lib/constants';
+import { isHostedProxy } from '../../lib/constants';
 
 // The model-interface manager: one door for every way in. Presets carry a
 // baseURL and a key page; the model list is always fetched live from the
@@ -46,8 +46,7 @@ export default function ApiKeyModal() {
   // sends no CORS): surface the limit BEFORE the 403, not after. Same-origin
   // alone is NOT "hosted" — the desktop shell serves same-origin from a
   // loopback address, and its bundled server reaches the bridge just fine.
-  const isLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-  const hostedBridgeBlocked = API_BASE === '' && !isLoopback && preset.baseURL.includes('127.0.0.1');
+  const hostedBridgeBlocked = isHostedProxy() && preset.baseURL.includes('127.0.0.1');
   const [key, setKey] = useState('');
   const [customURL, setCustomURL] = useState('');
   const [customName, setCustomName] = useState('');

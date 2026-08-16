@@ -1,8 +1,29 @@
 // Base URL of the LLM proxy. Dev defaults to the local server.mjs; a
-// production build defaults to SAME-ORIGIN /api/* (the deployment's worker
-// serves it) — zero-config correct on any host. Override with VITE_API_BASE
+// same-origin production build (the original Workers demo) leaves this
+// empty so /api/* hits the sibling worker. GitHub Pages has no proxy, so
+// it falls through to this fork's hosted worker. Override with VITE_API_BASE
 // when the proxy runs elsewhere (e.g. a static build against a LAN proxy).
-export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? 'http://localhost:3001' : '');
+const HOSTED_API = 'https://thoughtdag-sync.mingoing9610.workers.dev';
+
+function computeApiBase(): string {
+  const override = import.meta.env.VITE_API_BASE;
+  if (typeof override === 'string') return override.replace(/\/+$/, '');
+  if (import.meta.env.DEV) return 'http://localhost:3001';
+  if (typeof location !== 'undefined' && /\.github\.io$/.test(location.hostname)) return HOSTED_API;
+  return '';
+}
+
+export const API_BASE = computeApiBase();
+
+/** True when generations / probes go through the hosted Workers proxy
+    (same-origin demo or a remote workers.dev), not the local Node server. */
+export function isHostedProxy(): boolean {
+  if (typeof location === 'undefined') return false;
+  const loopback = new Set(['localhost', '127.0.0.1', '[::1]']);
+  if (!API_BASE) return !loopback.has(location.hostname);
+  try { return !loopback.has(new URL(API_BASE).hostname); }
+  catch { return false; }
+}
 
 // PDFs above this page count default to text-only context (Vision page images
 // would cost ~1500 tokens per page).

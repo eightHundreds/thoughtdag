@@ -1,8 +1,10 @@
 # ThoughtDAG sync vault
 
-A tiny Cloudflare Worker + R2 object store. The app talks to it with a
-**sync URL** and a **storage-area name** the user invents. Bodies are
-encrypted in the browser; this worker only stores opaque blobs.
+The hosted backend for this fork: the same stateless `/api/*` proxy as
+the original demo (`probe-models`, streaming, scholar search, link
+snapshots) plus an R2 object store. The app talks to the vault with a
+**sync URL** and a **storage-area name** the user invents. Vault bodies
+are encrypted in the browser; this worker only stores opaque blobs.
 
 The name is not a server password. Same URL + same name = the same
 namespace. A different name is a different empty vault.
@@ -38,3 +40,7 @@ Per storage-area namespace:
 
 Conflicts never merge graphs: the shared id keeps the remote copy, the
 local work is saved as a new project named `… (conflict)`.
+
+The same origin also serves the demo LLM proxy at `/api/*`, so a GitHub
+Pages frontend can set `VITE_API_BASE` (or detect `*.github.io`) and
+probe / generate through this worker instead of a same-origin `/api`.
