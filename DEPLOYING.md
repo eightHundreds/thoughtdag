@@ -32,6 +32,14 @@ Deliberately absent on the demo (local-proxy features): web search
 (operator's search key), MCP, PDF text extraction (attachments still work;
 extraction needs the local proxy's poppler).
 
+## Optional: remote canvas sync (Worker + R2)
+
+A separate Worker stores encrypted snapshots so two browsers can share
+canvases without an account. The user pastes the Worker URL and invents
+a storage-area name; the same pair on another computer is the same vault.
+
+See `workers/sync/README.md` for `wrangler` setup.
+
 ## Self-hosting the full app
 
 ```bash

@@ -158,12 +158,61 @@ export async function adoptImportedProject(
   kind: 'chat' | 'paradigm' = 'chat',
   extras?: Partial<Pick<ProjectMeta, 'instantiatedFrom'>>,
 ): Promise<void> {
-  const now = Date.now();
-  useProjects.setState((s) => ({
-    projects: [...s.projects, { id, name, createdAt: now, updatedAt: now, kind, ...extras }],
-  }));
-  await saveMeta();
+  await registerProject(id, name, kind, extras);
   await switchProject(id);
+}
+
+/** Add or update a project in the meta list without switching to it. */
+export async function registerProject(
+  id: string,
+  name: string,
+  kind: 'chat' | 'paradigm' = 'chat',
+  extras?: Partial<Omit<ProjectMeta, 'id' | 'name' | 'kind'>>,
+): Promise<void> {
+  const now = Date.now();
+  useProjects.setState((s) => {
+    const existing = s.projects.find((p) => p.id === id);
+    if (existing) {
+      return {
+        projects: s.projects.map((p) => (p.id === id ? { ...p, name, kind, ...extras } : p)),
+      };
+    }
+    return {
+      projects: [...s.projects, {
+        id, name, kind,
+        createdAt: extras?.createdAt ?? now,
+        updatedAt: extras?.updatedAt ?? now,
+        instantiatedFrom: extras?.instantiatedFrom,
+      }],
+    };
+  });
+  await saveMeta();
+}
+
+export async function loadProjectState(id: string): Promise<{ nodes: import('../types').ThoughtNode[]; edges: import('../types').ThoughtEdge[]; events?: import('../types').CanvasEvent[] } | null> {
+  const raw = await idbGet<unknown>(projectStorageKey(id));
+  if (raw == null) return null;
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const state = (parsed && typeof parsed === 'object' && 'state' in parsed)
+      ? (parsed as { state: { nodes?: unknown; edges?: unknown; events?: unknown } }).state
+      : parsed as { nodes?: unknown; edges?: unknown; events?: unknown };
+    if (!state || !Array.isArray(state.nodes) || !Array.isArray(state.edges)) return null;
+    return {
+      nodes: state.nodes as import('../types').ThoughtNode[],
+      edges: state.edges as import('../types').ThoughtEdge[],
+      events: Array.isArray(state.events) ? state.events as import('../types').CanvasEvent[] : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveProjectState(
+  id: string,
+  state: { nodes: import('../types').ThoughtNode[]; edges: import('../types').ThoughtEdge[]; events?: import('../types').CanvasEvent[] },
+): Promise<void> {
+  await idbSet(projectStorageKey(id), { state, version: 1 });
 }
 
 // Seed a new paradigm project with the built-in rule-out/rule-in score and

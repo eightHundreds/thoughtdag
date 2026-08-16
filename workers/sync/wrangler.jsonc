@@ -1,0 +1,11 @@
+{
+  "name": "thoughtdag-sync",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-01",
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "thoughtdag-sync"
+    }
+  ]
+}

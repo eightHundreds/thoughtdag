@@ -6,6 +6,8 @@ npm-debug.log*
 # Dependencies
 node_modules
 .env
+.dev.vars
+.wrangler/
 
 # Build
 dist

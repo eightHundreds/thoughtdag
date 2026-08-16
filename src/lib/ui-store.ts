@@ -111,6 +111,8 @@ interface UiState {
   setAutoBackupDir: (name: string | null) => void;
   lastAutoBackupAt: number | null;
   setLastAutoBackupAt: (t: number | null) => void;
+  lastRemoteSyncAt: number | null;
+  setLastRemoteSyncAt: (t: number | null) => void;
   backupDialogOpen: boolean;
   setBackupDialogOpen: (v: boolean) => void;
   condenseDialogOpen: boolean;
@@ -248,6 +250,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setAutoBackupDir: (name) => set({ autoBackupDir: name }),
   lastAutoBackupAt: null,
   setLastAutoBackupAt: (t) => set({ lastAutoBackupAt: t }),
+  lastRemoteSyncAt: null,
+  setLastRemoteSyncAt: (t) => set({ lastRemoteSyncAt: t }),
   backupDialogOpen: false,
   condenseDialogOpen: false,
   setCondenseDialogOpen: (v) => set({ condenseDialogOpen: v, ...(v ? {} : { condenseHighlightIds: [] }) }),

@@ -17,6 +17,7 @@ else {
   // Browsers grant it silently based on engagement; a refusal is harmless.
   if (navigator.storage?.persist) void navigator.storage.persist()
   void import('./lib/local-backup').then((m) => m.bootAutoBackup())
+  void import('./lib/remote-sync').then((m) => m.bootRemoteSync())
 }
 
 // A long-lived tab keeps running the bundle it loaded; nudge when a newer
