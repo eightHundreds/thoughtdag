@@ -214,7 +214,7 @@ export default function Tutorial() {
               <div key={n} className="bg-surface border border-line/70 rounded-xl p-4 flex flex-col animate-fade-in">
                 <div className="w-full aspect-[120/72] bg-card rounded-lg border border-line/60 mb-3 overflow-hidden">
                   {GIF_STEPS[n]
-                    ? <img src={`/tutorial/${GIF_STEPS[n]}-${lang}.gif`} loading="lazy" alt="" className="w-full h-full object-cover" />
+                    ? <img src={`${import.meta.env.BASE_URL}tutorial/${GIF_STEPS[n]}-${lang}.gif`} loading="lazy" alt="" className="w-full h-full object-cover" />
                     : DIAGRAMS[n]}
                 </div>
                 <h3 className="text-[13px] font-semibold text-ink leading-snug">{t(`tutorial.step${n}.title` as Parameters<typeof t>[0])}</h3>
