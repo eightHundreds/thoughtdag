@@ -5,6 +5,7 @@ import 'katex/dist/katex.min.css';
 import type { ThoughtNode as ThoughtNodeType } from '../types';
 import { useStore } from '../store';
 import { useZoomTier } from '../lib/use-map-mode';
+import { occupancyHeight } from '../lib/layout';
 import { generateId, isImeComposing , activeSummary, activeTopic, awaitingInput } from '../utils';
 import { processFile } from '../lib/attachments';
 import { copyText } from '../lib/export';
@@ -20,7 +21,7 @@ import MentionSurface from './ui/NodeMention';
 import { useMentions } from '../lib/mentions';
 import { isViewerMode } from '../lib/viewer';
 
-export default function ThoughtNode({ id, data }: NodeProps<ThoughtNodeType>) {
+export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeType>) {
   // Actions are stable references: selecting them one by one (instead of a
   // bare useStore() destructure) means this card no longer re-renders on
   // EVERY store change — with N cards mounted that multiplied every
@@ -93,9 +94,13 @@ export default function ThoughtNode({ id, data }: NodeProps<ThoughtNodeType>) {
   // (waiting/running states are what the human watches), not a map. Both
   // keep their working form at every zoom.
   const zoomedOut = mapMode && !isAwaitingHuman && !isAwaitingAsk && !(isParadigmNode && runLocked);
-  // Glyph tier: the node collapses to one seal — the thinking's skeleton
+  // Glyph / map paint inside the work-tier box — occupancy never shrinks.
   const glyphTier = zoomTier === 'glyph' && zoomedOut;
-  // Handles move to hug the seal at glyph tier — tell React Flow to re-measure
+  const occupyHFromStore = useStore((s) => {
+    const n = s.nodes.find((x) => x.id === id);
+    return n ? occupancyHeight(n) : 0;
+  });
+  const occupyH = Math.max(height ?? 0, occupyHFromStore);
   const updateNodeInternals = useUpdateNodeInternals();
   useEffect(() => { updateNodeInternals(id); }, [glyphTier, id, updateNodeInternals]);
   // Upstream changed since this answer was written (see recomputeStaleness)
@@ -293,6 +298,11 @@ export default function ThoughtNode({ id, data }: NodeProps<ThoughtNodeType>) {
   // Map layer: the display summary for the ACTIVE version. Long answers wear
   // it instead of raw text; the full answer lives one double-click away.
   const versionSummary = activeSummary(data);
+  const mapHeadline = versionSummary
+    || (data.question ? data.question.replace(/\s+/g, ' ').slice(0, 160) : '');
+  const mapSubline = versionSummary
+    ? data.question.replace(/\s+/g, ' ').slice(0, 120)
+    : '';
   const takeawayType = data.summaryTypes?.[data.responseIndex] ?? undefined;
   // Reasoning of the ACTIVE version (models that emit it); display only
   const versionReasoning = data.reasonings?.[data.responseIndex] ?? undefined;
@@ -323,11 +333,10 @@ export default function ThoughtNode({ id, data }: NodeProps<ThoughtNodeType>) {
   return (
     <div
       ref={nodeRef}
-      className={glyphTier
-        ? `w-[520px] animate-fade-in transition-all duration-200 ${data.archived ? 'opacity-35 saturate-50 ' : ''}${selectedNodeId === id ? 'glyph-selected ' : ''}`
-        : `thought-node rounded-xl w-[520px] animate-fade-in transition-all duration-200 ${zoomedOut ? 'map-node ' : ''}${condenseLit ? 'condense-lit ' : ''}${data.archived ? 'opacity-35 saturate-50 ' : ''}${isWaitingUpstream ? 'opacity-60 ' : ''}${
+      style={zoomedOut && occupyH > 0 ? { height: occupyH, minHeight: occupyH } : undefined}
+      className={`thought-node rounded-xl w-[520px] ${zoomedOut ? 'h-full map-node ' : ''}${glyphTier ? 'glyph-node ' : ''}animate-fade-in transition-colors duration-200 ${condenseLit ? 'condense-lit ' : ''}${data.archived ? 'opacity-35 saturate-50 ' : ''}${isWaitingUpstream ? 'opacity-60 ' : ''}${
         data.isEvaluator ? 'evaluator-node' : isHuman ? 'human-node' : isBranch ? 'orange-node' : isRoot ? 'root-node' : 'branch-node'
-      } ${data.isLoading ? 'loading-border' : ''} ${selectedNodeId === id ? 'ring-2 ring-accent !border-accent selected-glow' : ''} ${isDropTarget ? 'ring-2 ring-accent/50 ring-dashed' : ''}`}
+      } ${data.isLoading ? 'loading-border' : ''} ${selectedNodeId === id ? `ring-2 ring-accent !border-accent selected-glow${glyphTier ? ' glyph-selected' : ''}` : ''} ${isDropTarget ? 'ring-2 ring-accent/50 ring-dashed' : ''}`}
       onClick={() => setSelectedNodeId(id)}
       onDoubleClick={() => {
         // Double-click opens the panel (single click only selects); inner
@@ -350,12 +359,24 @@ export default function ThoughtNode({ id, data }: NodeProps<ThoughtNodeType>) {
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDropTarget(true); }}
       onDragLeave={() => setIsDropTarget(false)}
     >
-      <Handle type="target" position={Position.Top} id="top" className={`!bg-accent !border-2 !border-white tdag-handle ${zoomedOut ? '!w-6 !h-6 tdag-handle-lg' : '!w-3.5 !h-3.5'}`} />
+      <Handle
+        type="target"
+        position={Position.Top}
+        id="top"
+        className={`!bg-accent !border-2 !border-white tdag-handle ${zoomedOut ? '!w-6 !h-6 tdag-handle-lg' : '!w-3.5 !h-3.5'}`}
+      />
       {/* Side anchors: NOT interaction targets — the system routes dashed
           reference edges through them so cross-chain lines never cut across
           the vertical chain grammar. Two handles for people (top in, bottom
           out); four anchors for the layout. */}
-      <Handle type="target" position={Position.Left} id="left" isConnectable={false} className="!bg-transparent !w-0 !h-0 !border-0 !pointer-events-none" style={glyphTier ? { top: '50%', left: 'calc(50% - 56px)' } : { top: '40%' }} />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="left"
+        isConnectable={false}
+        className="!bg-transparent !w-0 !h-0 !border-0 !pointer-events-none"
+        style={{ top: '40%' }}
+      />
 
       {/* Stale dot pins to the CARD's corner — at glyph tier the card is
           gone (one centered seal), so the seal wears an amber ring instead
@@ -380,7 +401,7 @@ export default function ThoughtNode({ id, data }: NodeProps<ThoughtNodeType>) {
         // Typed moves keep their color, takeaway-bearing steps spark ✦,
         // evaluators wear the red eye, digests the book, plain steps a dot.
         <div
-          className="drag-handle cursor-grab active:cursor-grabbing w-full h-32 flex items-center justify-center"
+          className="drag-handle cursor-grab active:cursor-grabbing w-full h-full flex items-center justify-center"
           title={[
             data.isEvaluator
               ? t('evaluator.badge')
@@ -418,7 +439,7 @@ export default function ThoughtNode({ id, data }: NodeProps<ThoughtNodeType>) {
         // title — the reader's entry point — so there question leads and
         // the takeaway is the subtitle.
         <div
-          className="drag-handle cursor-grab active:cursor-grabbing px-6 py-5 relative"
+          className="drag-handle cursor-grab active:cursor-grabbing px-6 py-5 relative w-full h-full flex flex-col justify-start"
           onDoubleClick={(e) => {
             e.stopPropagation();
             // a plaque is a map label: double-click dives to working scale
@@ -426,35 +447,31 @@ export default function ThoughtNode({ id, data }: NodeProps<ThoughtNodeType>) {
             if (n) rf.setCenter(n.position.x + 260, n.position.y + 120, { zoom: 1, duration: 300 });
           }}
         >
-          {(versionSummary || data.response) ? (
-            isRoot ? (
-              <>
-                <div className="text-2xl font-semibold text-ink leading-snug line-clamp-3">
-                  {data.question}
+          {isRoot ? (
+            <>
+              <div className="map-lod-title font-semibold text-ink min-h-0 overflow-hidden">
+                {data.question}
+              </div>
+              {versionSummary && (
+                <div className="map-lod-sub text-ink-muted mt-2 min-h-0 overflow-hidden">
+                  {versionSummary}
                 </div>
-                <div className="text-lg text-ink-muted leading-snug line-clamp-2 mt-1.5">
-                  {versionSummary || data.response.replace(/[#*`>-]/g, '').slice(0, 140)}
-                </div>
-              </>
-            ) : (
-              // Thinning by signal: badged turns (ruled out / decided /
-              // pivoted / open) keep the full takeaway in full ink — the
-              // map's landmarks. Unbadged waypoints shrink to their micro
-              // topic (when the judge wrote one) in muted ink, so the
-              // turning points read first.
-              <>
-                <div className="text-lg text-ink-muted leading-snug line-clamp-2">
-                  {data.question}
-                </div>
-                <div className={`text-2xl font-semibold leading-snug line-clamp-3 mt-1.5 ${badge ? 'text-ink' : 'text-ink-muted'}`}>
-                  {(badge ? versionSummary : (activeTopic(data) ?? versionSummary)) || data.response.replace(/[#*`>-]/g, '').slice(0, 140)}
-                </div>
-              </>
-            )
+              )}
+            </>
           ) : (
-            <div className="text-2xl font-semibold text-ink leading-snug line-clamp-3">
-              {data.question}
-            </div>
+            // Thinning by signal: badged turns keep the takeaway in full
+            // ink. Unbadged waypoints shrink to their micro topic. Never
+            // dump the raw answer — the box is occupancy, not a document.
+            <>
+              {mapSubline && (
+                <div className="map-lod-sub text-ink-muted shrink-0">
+                  {mapSubline}
+                </div>
+              )}
+              <div className={`map-lod-title font-semibold ${mapSubline ? 'mt-2 ' : ''}min-h-0 overflow-hidden ${badge ? 'text-ink' : 'text-ink-muted'}`}>
+                {(badge ? versionSummary : (activeTopic(data) ?? versionSummary)) || mapHeadline}
+              </div>
+            </>
           )}
         </div>
       ) : (
@@ -891,14 +908,19 @@ export default function ThoughtNode({ id, data }: NodeProps<ThoughtNodeType>) {
       </>
       )}
 
-      <Handle type="source" position={Position.Bottom} id="continue" className={`!bg-accent !border-2 !border-white tdag-handle ${zoomedOut ? '!w-6 !h-6 tdag-handle-lg' : '!w-3.5 !h-3.5'}`} />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="continue"
+        className={`!bg-accent !border-2 !border-white tdag-handle ${zoomedOut ? '!w-6 !h-6 tdag-handle-lg' : '!w-3.5 !h-3.5'}`}
+      />
       <Handle
         type="source"
         position={Position.Right}
         id="branch"
         isConnectable={false}
         className="!bg-transparent !w-0 !h-0 !border-0 !pointer-events-none"
-        style={glyphTier ? { top: '50%', left: 'calc(50% + 56px)', right: 'auto' } : { top: '50%' }}
+        style={{ top: '50%' }}
       />
 
       {/* Floating toolbar for text selection */}

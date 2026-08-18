@@ -4,6 +4,7 @@ import { BookOpen, ExternalLink, FileText, Link2, Link2Off, Loader2, MoveDiagona
 import type { ThoughtNode as ThoughtNodeType } from '../types';
 import { useStore } from '../store';
 import { useZoomTier } from '../lib/use-map-mode';
+import { occupancyHeight } from '../lib/layout';
 import { useUiStore } from '../lib/ui-store';
 import { triggerParadigmCascade } from '../store/streaming';
 import { extractImage, fetchLinkIntoNode, ingestFiles } from '../lib/content';
@@ -20,7 +21,7 @@ import { isViewerMode } from '../lib/viewer';
 // them. In a paradigm, an empty content node is a MATERIAL SLOT: the
 // cascade waits until the human fills it, like a human turn.
 
-export default function ContentNode({ id, data, selected }: NodeProps<ThoughtNodeType>) {
+export default function ContentNode({ id, data, selected, height }: NodeProps<ThoughtNodeType>) {
   const t = useT();
   const deleteNode = useStore((s) => s.deleteNode);
   const removeAttachment = useStore((s) => s.removeAttachment);
@@ -42,6 +43,11 @@ export default function ContentNode({ id, data, selected }: NodeProps<ThoughtNod
     return full > 0 ? `full:${full}` : 'quote:0';
   });
   const glyphTier = zoomTier === 'glyph';
+  const occupyHFromStore = useStore((s) => {
+    const n = s.nodes.find((x) => x.id === id);
+    return n ? occupancyHeight(n) : 0;
+  });
+  const occupyH = Math.max(height ?? 0, occupyHFromStore);
   const updateNodeInternals = useUpdateNodeInternals();
   useEffect(() => { updateNodeInternals(id); }, [glyphTier, id, updateNodeInternals]);
 
@@ -93,11 +99,14 @@ export default function ContentNode({ id, data, selected }: NodeProps<ThoughtNod
       : <Paperclip size={14} strokeWidth={1.75} className="text-ink-muted shrink-0" />;
 
   if (glyphTier) {
-    // Glyph tier: material collapses to its own icon — a note, a document,
-    // a link. The footprint stays (edge anchors must not shift); only the
-    // centered seal renders.
+    // Seal sits inside the reserved work-tier box so neighboring cards
+    // never collide when the icon counter-scales.
     return (
-      <div className={`drag-handle cursor-grab active:cursor-grabbing w-full h-full min-w-[340px] flex items-center justify-center ${selectedNodeId === id ? 'glyph-selected' : ''}`}
+      <div
+        className={`thought-node map-node glyph-node drag-handle cursor-grab active:cursor-grabbing w-full min-w-[340px] flex items-center justify-center rounded-xl border-2 ${
+          kind === 'note' ? 'bg-amber-50/90 border-amber-200' : 'bg-card border-line'
+        } ${selectedNodeId === id ? 'ring-2 ring-accent selected-glow glyph-selected' : ''}`}
+        style={{ minHeight: occupyH || undefined, height: occupyH || undefined }}
         onClick={() => setSelectedNodeId(id)} data-glyph-node
         onDoubleClick={(e) => {
           e.stopPropagation();
@@ -111,10 +120,20 @@ export default function ContentNode({ id, data, selected }: NodeProps<ThoughtNod
         }`}>
           {kind === 'note' ? <StickyNote size={60} strokeWidth={2} /> : kind === 'link' ? <Link2 size={60} strokeWidth={2} /> : <FileText size={60} strokeWidth={2} />}
         </span>
-        <Handle type="source" position={Position.Bottom} id="continue" className="!bg-ink-faint !border-2 !border-white tdag-handle !w-6 !h-6 tdag-handle-lg" style={{ left: '50%' }} />
-        {/* reader-grown branches leave through this handle — without it,
-            React Flow drops those edges entirely at glyph zoom */}
-        <Handle type="source" position={Position.Right} id="branch" isConnectable={false} className="!bg-transparent !w-0 !h-0 !border-0 !pointer-events-none" style={{ top: '50%', left: 'calc(50% + 56px)', right: 'auto' }} />
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          id="continue"
+          className="!bg-ink-faint !border-2 !border-white tdag-handle !w-6 !h-6 tdag-handle-lg"
+        />
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="branch"
+          isConnectable={false}
+          className="!bg-transparent !w-0 !h-0 !border-0 !pointer-events-none"
+          style={{ top: '50%' }}
+        />
       </div>
     );
   }

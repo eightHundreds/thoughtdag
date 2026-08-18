@@ -92,7 +92,12 @@ export const createNodeSlice: StateCreator<StoreState, [], [], NodeSlice> = (set
     set((state) => ({
       nodes: state.nodes.map((n) => {
         if (n.id === nodeId) {
-          return { ...n, data: { ...n.data, isCollapsed: !n.data.isCollapsed } };
+          return {
+            ...n,
+            height: newHeight,
+            measured: { ...n.measured, width: n.measured?.width, height: newHeight },
+            data: { ...n.data, isCollapsed: !n.data.isCollapsed },
+          };
         }
         // Shift descendants vertically by delta
         if (descSet.has(n.id)) {

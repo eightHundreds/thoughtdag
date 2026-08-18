@@ -22,14 +22,27 @@ export function estimateNodeHeight(node: ThoughtNode): number {
   return Math.max(260, Math.min(900, estimated));
 }
 
-// Height used for layout: the larger of the measured DOM height (React
-// Flow's ResizeObserver writes `measured` back through onNodesChange) and
-// the estimate. The max matters: while zoomed out, semantic zoom renders
-// small thumbnail cards, so `measured` under-reports the full-size height —
-// laying out with it would overlap once the user zooms back in. Slightly
-// generous spacing beats overlapping cards.
+// World-space occupancy: the work-tier box. LOD (map plaques, glyph seals)
+// paints inside this box and must never shrink it — otherwise two cards
+// that were N px apart at work zoom stack when the box collapses.
+export function occupancyHeight(node: Pick<ThoughtNode, 'data' | 'measured' | 'height'>): number {
+  const stored = Math.max(node.measured?.height ?? 0, node.height ?? 0);
+  const kind = node.data?.stepKind;
+  if (kind === 'note' || kind === 'file' || kind === 'link' || kind === 'frame') {
+    return stored || 120;
+  }
+  if (node.data?.isCollapsed) {
+    return stored > 0 && stored < COLLAPSED_NODE_HEIGHT + 40 ? stored : COLLAPSED_NODE_HEIGHT;
+  }
+  // Prefer the stamped work-tier box. A leftover plaque/glyph measurement
+  // (~128–176px) is not occupancy — fall back to the work-card estimate.
+  if (stored >= 180) return stored;
+  return estimateNodeHeight(node as ThoughtNode);
+}
+
+// Height used for layout: occupancy, never the current LOD thumbnail.
 export function nodeHeight(node: ThoughtNode): number {
-  return Math.max(node.measured?.height ?? 0, estimateNodeHeight(node));
+  return occupancyHeight(node);
 }
 
 /**

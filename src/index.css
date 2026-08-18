@@ -226,7 +226,6 @@ textarea:focus-visible {
 .react-flow__handle.tdag-handle-lg::after {
   inset: -18px;
 }
-
 /* Focus panel: sections are white cards floating on the wash ground —
    depth does the grouping, not divider lines. */
 .panel-card {
@@ -415,9 +414,11 @@ body.tdag-connecting, body.tdag-connecting * {
   user-select: none;
 }
 
-/* ── Map mode: the card becomes a label plaque ─────────────────────
-   Same bounding box (edges and layout depend on it), different visual
-   language: pill radius, stronger type-colored edge, no document bar. */
+/* ── Map mode: same world box, takeaway painted inside ─────────────
+   Occupancy is frozen at the work-tier card. The plaque fills that
+   box (pill radius, type-colored edge, no document bar) so zoom
+   never opens holes between neighbors. Type grows a little as you
+   zoom out, then clamps — Heptabase-style "large text at small zoom". */
 .thought-node.map-node {
   border-radius: 26px;
   border-width: 3px;
@@ -429,6 +430,17 @@ body.tdag-connecting, body.tdag-connecting * {
 .map-node.orange-node { border-color: color-mix(in srgb, var(--color-warm) 88%, var(--color-line)); }
 .map-node.evaluator-node { border-color: color-mix(in srgb, var(--color-watch) 82%, var(--color-line)); }
 .map-node.human-node { border-color: color-mix(in srgb, #d97706 82%, var(--color-line)); }
+[data-zoom-tier='map'] .thought-node.map-node {
+  container-type: size;
+}
+[data-zoom-tier='map'] .thought-node.map-node .map-lod-title {
+  font-size: clamp(22px, 8cqh, 42px);
+  line-height: 1.25;
+}
+[data-zoom-tier='map'] .thought-node.map-node .map-lod-sub {
+  font-size: clamp(14px, 4.2cqh, 22px);
+  line-height: 1.35;
+}
 
 /* Global fast tooltip (replaces the browser's sluggish native title) */
 .tdag-tooltip {
@@ -449,22 +461,21 @@ body.tdag-connecting, body.tdag-connecting * {
 }
 
 /* ── Glyph tier (semantic zoom L3) ────────────────────────────── */
-/* Selected glyph node: a soft ring around the seal */
-.glyph-selected > div > span {
-  outline: 3px solid var(--color-accent, #6b5ce7);
-  outline-offset: 3px;
+/* Same reserved box as work/map. The card chrome stays; only the
+   interior collapses to a centered seal. No counter-scale — the
+   icon shrinks with the canvas like everything else. */
+.thought-node.glyph-node {
+  border-radius: 26px;
+  border-width: 3px;
 }
-/* Glyph seals keep a FIXED SCREEN SIZE (POI style, like map pins): the
-   scale cancels the viewport zoom below the glyph threshold (0.32), so
-   zooming further out tightens the map instead of shrinking the seals.
-   At zoom = 0.32 the factor is exactly 1 — the tier transition is seamless. */
-[data-zoom-tier='glyph'] [data-glyph-node] > span {
-  transform: scale(calc(0.32 / var(--tdag-zoom, 0.32)));
+.thought-node.glyph-node::before {
+  display: none;
 }
 
-/* Edges thicken at glyph zoom so the skeleton stays legible at distance */
+/* Edges stay a bit heavier at glyph zoom so the skeleton reads, but
+   they no longer counter-scale — the box is the unit, not the pin. */
 [data-zoom-tier='glyph'] .react-flow__edge path.react-flow__edge-path {
-  stroke-width: calc(7px * 0.32 / var(--tdag-zoom, 0.32)) !important;
+  stroke-width: 3px !important;
 }
 
 /* Unbroken long tokens (URLs, DOIs, hashes) must wrap instead of escaping
