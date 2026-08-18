@@ -1,5 +1,6 @@
-import { API_BASE } from './constants';
+import { API_BASE, isHostedProxy } from './constants';
 import { errorText } from './error-text';
+import { t } from '../i18n';
 import type { ModelData } from './use-models';
 
 // Browser-configured model providers: the .env-free path in. Anything that
@@ -147,7 +148,13 @@ export async function probeModels(baseURL: string, apiKey: string): Promise<Runt
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(errorText(err, `HTTP ${res.status}`));
+    const raw = errorText(err, `HTTP ${res.status}`);
+    // Vault-only Worker builds treat /api/* as a namespaced store and
+    // answer 401 unauthorized. That is not the provider rejecting the key.
+    if (/^unauthorized$/i.test(raw) && isHostedProxy()) {
+      throw new Error(t('provider.probeProxyStale'));
+    }
+    throw new Error(raw);
   }
   const models = ((await res.json()).models ?? []) as RuntimeModel[];
   for (const m of models) {

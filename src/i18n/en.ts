@@ -120,6 +120,7 @@ export const en = {
   'provider.probe': 'Fetch model list',
   'provider.probing': 'Asking the endpoint…',
   'provider.probeEmpty': 'The endpoint returned no models. Check that the service is running and the key is right.',
+  'provider.probeProxyStale': 'The hosted proxy is still the vault-only build, so model lists never leave the page. Redeploy workers/sync so /api/probe-models is public.',
   'provider.pickModels': 'Pick the models to enable ({n} offered)',
   'provider.filter': 'Filter…',
   'provider.pickedCount': '{n} selected',

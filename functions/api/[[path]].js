@@ -480,6 +480,19 @@ async function handleClaude(body) {
   }
 }
 
+async function probeUpstreamError(r, apiKey) {
+  let detail = '';
+  try {
+    const errBody = await r.json();
+    const raw = errBody?.error?.message ?? errBody?.error ?? errBody?.message ?? '';
+    if (typeof raw === 'string') detail = raw.trim();
+  } catch { /* non-JSON error bodies stay unnamed */ }
+  const hint = (r.status === 401 || r.status === 403)
+    ? (apiKey ? 'the key was rejected' : 'this endpoint requires an API key')
+    : `endpoint answered HTTP ${r.status}`;
+  return { error: detail ? `${hint}: ${detail}` : hint, status: r.status };
+}
+
 async function handleProbeModels(body) {
   const { baseURL, apiKey } = body ?? {};
   if (!baseURL) return json({ error: 'baseURL required' }, 400);
@@ -488,7 +501,10 @@ async function handleProbeModels(body) {
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
       signal: AbortSignal.timeout(15000),
     });
-    if (!r.ok) return json({ error: `endpoint answered HTTP ${r.status}` }, r.status);
+    if (!r.ok) {
+      const { error, status } = await probeUpstreamError(r, apiKey);
+      return json({ error }, status);
+    }
     const data = await r.json();
     const list = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
     const models = list.map((m) => ({
@@ -566,6 +582,7 @@ export async function onRequest({ request, params }) {
   const path = '/' + (Array.isArray(params.path) ? params.path.join('/') : params.path ?? '');
   const method = request.method;
 
+  if (method === 'GET' && path === '/health') return json({ ok: true, service: 'thoughtdag-proxy' });
   if (method === 'GET' && path === '/models') return json(modelsPayloadFor([]));
   if (method === 'GET' && path === '/tools') return json({ mcpServers: [] });
 

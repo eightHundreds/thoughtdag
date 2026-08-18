@@ -19,6 +19,9 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders(request) });
     }
+    if (request.method === 'GET' && url.pathname === '/api/health') {
+      return json(request, { ok: true, service: 'thoughtdag-proxy' });
+    }
     if (url.pathname.startsWith('/api/')) {
       const path = url.pathname.slice('/api/'.length);
       const res = await onRequest({ request, params: { path: path.split('/') }, env });

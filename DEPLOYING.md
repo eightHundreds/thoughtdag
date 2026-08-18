@@ -40,7 +40,10 @@ vault (`/v1/*`). GitHub Pages has no `/api` of its own, so the Pages
 build talks to that Worker. The user still pastes the Worker URL and
 invents a storage-area name for canvas sync.
 
-See `workers/sync/README.md` for `wrangler` setup.
+See `workers/sync/README.md` for `wrangler` setup. After deploy,
+`GET /api/health` should return `{ ok: true, service: "thoughtdag-proxy" }`.
+If Pages instead gets `401 unauthorized` from `/api/probe-models`, the
+Worker is still the vault-only build — redeploy `workers/sync`.
 
 ## Self-hosting the full app
 

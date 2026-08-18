@@ -18,6 +18,15 @@ wrangler r2 bucket create thoughtdag-sync
 wrangler deploy
 ```
 
+Pushing `workers/sync/**` or `functions/api/**` to `main` / `f/cloud-sync`
+also deploys via `.github/workflows/sync-worker.yml`. The repo needs
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Until that Worker
+is live, GitHub Pages calls `/api/probe-models` on a vault-only build
+and gets `401 unauthorized` (CORS preflight also omits POST).
+
+`GET /api/health` must return `{ ok: true, service: "thoughtdag-proxy" }`.
+`GET /v1/health` is the vault canary and stays separate.
+
 Do **not** set `SYNC_TOKEN`. Users type their own area name in the app.
 
 ## In the app

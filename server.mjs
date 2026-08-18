@@ -705,7 +705,19 @@ app.post('/api/probe-models', async (req, res) => {
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
       signal: AbortSignal.timeout(15000),
     });
-    if (!r.ok) { res.status(r.status).json({ error: `endpoint answered HTTP ${r.status}` }); return; }
+    if (!r.ok) {
+      let detail = '';
+      try {
+        const errBody = await r.json();
+        const raw = errBody?.error?.message ?? errBody?.error ?? errBody?.message ?? '';
+        if (typeof raw === 'string') detail = raw.trim();
+      } catch { /* non-JSON error bodies stay unnamed */ }
+      const hint = (r.status === 401 || r.status === 403)
+        ? (apiKey ? 'the key was rejected' : 'this endpoint requires an API key')
+        : `endpoint answered HTTP ${r.status}`;
+      res.status(r.status).json({ error: detail ? `${hint}: ${detail}` : hint });
+      return;
+    }
     const body = await r.json();
     const list = Array.isArray(body.data) ? body.data : Array.isArray(body.models) ? body.models : [];
     const models = list.map((m) => ({

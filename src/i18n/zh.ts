@@ -120,6 +120,7 @@ export const zh: Record<keyof typeof en, string> = {
   'provider.probe': '获取模型列表',
   'provider.probing': '正在询问接口…',
   'provider.probeEmpty': '接口没有返回任何模型。确认服务已启动、key 正确。',
+  'provider.probeProxyStale': '线上代理还是保险库旧版，模型列表到不了页面。重新部署 workers/sync，让 /api/probe-models 对页面开放。',
   'provider.pickModels': '选择要启用的模型（接口共提供 {n} 个）',
   'provider.filter': '过滤…',
   'provider.pickedCount': '已选 {n} 个',

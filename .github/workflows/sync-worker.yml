@@ -1,0 +1,36 @@
+# Redeploy the hosted proxy + vault. Pages already points VITE_API_BASE
+# here; a vault-only Worker answers /api/probe-models with 401.
+name: Deploy sync Worker
+
+on:
+  push:
+    branches: [main, f/cloud-sync]
+    paths:
+      - 'workers/sync/**'
+      - 'functions/api/**'
+      - '.github/workflows/sync-worker.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/sync
+          command: deploy
