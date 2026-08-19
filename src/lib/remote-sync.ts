@@ -180,7 +180,8 @@ async function api(
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${authToken}`);
-  const res = await fetch(`${endpoint}${path}`, { ...init, headers });
+  headers.set('Cache-Control', 'no-cache');
+  const res = await fetch(`${endpoint}${path}`, { ...init, headers, cache: 'no-store' });
   return res;
 }
 
@@ -442,9 +443,7 @@ async function syncPrefs(
   const last = localStorage.getItem(PREFS_RECORD_KEY);
   const info = remote.find((o) => o.key === PREFS_KEY);
   if (!info) {
-    await putObject(endpoint, authToken, PREFS_KEY, await encryptJson(encKey, { ...local, hash: localHash }), {
-      kind: 'prefs', hash: localHash, updatedAt: new Date(local.updatedAt).toISOString(),
-    });
+    await putPrefs(endpoint, authToken, encKey, local, localHash);
     localStorage.setItem(PREFS_RECORD_KEY, localHash);
     return 0;
   }
@@ -471,11 +470,30 @@ async function syncPrefs(
   }
   // Local wins prefs on conflict, keys included. The other computer will
   // pick them up on the next pull.
-  await putObject(endpoint, authToken, PREFS_KEY, await encryptJson(encKey, { ...local, hash: localHash }), {
-    kind: 'prefs', hash: localHash, updatedAt: new Date(local.updatedAt).toISOString(),
-  }, obj.etag);
+  await putPrefs(endpoint, authToken, encKey, local, localHash, obj.etag);
   localStorage.setItem(PREFS_RECORD_KEY, localHash);
   return 0;
+}
+
+async function putPrefs(
+  endpoint: string,
+  authToken: string,
+  encKey: CryptoKey,
+  local: Omit<PrefsSnapshot, 'hash'>,
+  localHash: string,
+  etag?: string,
+): Promise<void> {
+  const bytes = await encryptJson(encKey, { ...local, hash: localHash });
+  const meta = { kind: 'prefs', hash: localHash, updatedAt: new Date(local.updatedAt).toISOString() };
+  try {
+    await putObject(endpoint, authToken, PREFS_KEY, bytes, meta, etag);
+  } catch (err) {
+    // A disk-cached GET (or a racing writer) leaves us with a stale
+    // etag / a false "object missing". One live GET + retry is enough.
+    if ((err as { code?: string }).code !== 'precondition') throw err;
+    const fresh = await getObject(endpoint, authToken, PREFS_KEY);
+    await putObject(endpoint, authToken, PREFS_KEY, bytes, meta, fresh.etag);
+  }
 }
 
 async function syncProject(

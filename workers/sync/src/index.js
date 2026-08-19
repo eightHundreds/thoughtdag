@@ -155,8 +155,12 @@ function objectHeaders(request, obj) {
   return {
     ...corsHeaders(request),
     'Content-Type': obj.httpMetadata?.contentType || 'application/octet-stream',
+    // ETag stays for If-Match. Last-Modified is omitted so browsers and
+    // local proxies do not heuristic-cache a vault blob and hand a stale
+    // etag to the next PUT (412 Precondition Failed).
     ETag: obj.httpEtag,
-    'Last-Modified': obj.uploaded ? new Date(obj.uploaded).toUTCString() : undefined,
+    'Cache-Control': 'private, no-store',
+    Pragma: 'no-cache',
     'X-Object-Name': meta.name || '',
     'X-Object-Updated-At': meta.updatedAt || '',
     'X-Object-Hash': meta.hash || '',
@@ -191,7 +195,12 @@ function corsHeaders(request) {
 function json(request, body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders(request), 'Content-Type': 'application/json' },
+    headers: {
+      ...corsHeaders(request),
+      'Content-Type': 'application/json',
+      'Cache-Control': 'private, no-store',
+      Pragma: 'no-cache',
+    },
   });
 }
 
