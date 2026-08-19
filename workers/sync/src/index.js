@@ -180,12 +180,31 @@ async function authorize(request, _env) {
   return sha256Hex(NS_PREFIX + presented);
 }
 
+const CORS_ALLOW_HEADERS = [
+  'Authorization',
+  'Content-Type',
+  'Cache-Control',
+  'If-Match',
+  'If-None-Match',
+  'X-Object-Name',
+  'X-Object-Updated-At',
+  'X-Object-Hash',
+  'X-Object-Kind',
+];
+
 function corsHeaders(request) {
   const origin = request.headers.get('Origin') || '*';
+  // Echo Access-Control-Request-Headers so a new client header cannot
+  // CORS-break the vault the way Cache-Control did after the no-store fix.
+  const requested = (request.headers.get('Access-Control-Request-Headers') || '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean);
+  const allow = [...new Set([...CORS_ALLOW_HEADERS, ...requested])];
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, HEAD, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, If-None-Match, X-Object-Name, X-Object-Updated-At, X-Object-Hash, X-Object-Kind',
+    'Access-Control-Allow-Headers': allow.join(', '),
     'Access-Control-Expose-Headers': 'ETag, Last-Modified, X-Object-Name, X-Object-Updated-At, X-Object-Hash, X-Object-Kind',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',

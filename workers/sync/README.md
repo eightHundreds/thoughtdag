@@ -27,6 +27,10 @@ and gets `401 unauthorized` (CORS preflight also omits POST).
 `GET /api/health` must return `{ ok: true, service: "thoughtdag-proxy" }`.
 `GET /v1/health` is the vault canary and stays separate.
 
+CORS preflight on `/v1/*` must allow every header the Pages client
+sends (`Authorization`, `Cache-Control`, the `If-*` / `X-Object-*`
+family). `npm test` (`scripts/test-sync-worker.mjs`) locks that.
+
 Do **not** set `SYNC_TOKEN`. Users type their own area name in the app.
 
 ## In the app
