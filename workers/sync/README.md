@@ -54,6 +54,13 @@ Per storage-area namespace:
 Conflicts never merge graphs: the shared id keeps the remote copy, the
 local work is saved as a new project named `… (conflict)`.
 
+Deletes are first-class. Removing a canvas on this computer DELETEs
+`project-<id>` in the vault. Removing it on the other computer drops
+the local copy unless this computer edited it after the last sync
+(then it is uploaded again). Emptying every node is a push of the
+empty graph, not a pull that resurrects the old nodes. `npm test`
+covers the decision table.
+
 The same origin also serves the demo LLM proxy at `/api/*`, so a GitHub
 Pages frontend can set `VITE_API_BASE` (or detect `*.github.io`) and
 probe / generate through this worker instead of a same-origin `/api`.

@@ -138,7 +138,7 @@ export async function renameProject(id: string, name: string): Promise<void> {
   await saveMeta();
 }
 
-export async function deleteProject(id: string): Promise<void> {
+export async function deleteProject(id: string, opts?: { propagate?: boolean }): Promise<void> {
   const { projects, activeId } = useProjects.getState();
   if (id === activeId) {
     const rest = projects.filter((p) => p.id !== id);
@@ -148,6 +148,15 @@ export async function deleteProject(id: string): Promise<void> {
   await idbDel(projectStorageKey(id));
   useProjects.setState((s) => ({ projects: s.projects.filter((p) => p.id !== id) }));
   await saveMeta();
+  // The vault used to resurrect a deleted canvas on the next sync: the
+  // remote object was never removed, and an empty local copy was treated
+  // as "pull the vault". Remember the id so syncNow can DELETE it.
+  // propagate:false is the inbound path (the other computer already deleted).
+  if (opts?.propagate === false) return;
+  try {
+    const { rememberDeletedProject } = await import('../lib/remote-sync');
+    rememberDeletedProject(id);
+  } catch { /* remote-sync is optional at boot */ }
 }
 
 // Register a project entry for graph data already written to its storage key

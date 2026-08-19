@@ -171,6 +171,32 @@ test('PUT prefs If-None-Match * 412s when the object already exists', async () =
   assert.ok(body.etag);
 });
 
+test('DELETE /v1/objects/project-x removes the canvas object', async () => {
+  const workerEnv = env();
+  const put = await handle(req('/v1/objects/project-x', {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      'If-None-Match': '*',
+      'Content-Type': 'application/octet-stream',
+    },
+    body: new Uint8Array([1]),
+  }), workerEnv);
+  assert.equal(put.status, 200);
+
+  const del = await handle(req('/v1/objects/project-x', {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${TOKEN}` },
+  }), workerEnv);
+  assert.equal(del.status, 200);
+  assert.equal(del.headers.get('Access-Control-Allow-Origin'), ORIGIN);
+
+  const gone = await handle(req('/v1/objects/project-x', {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+  }), workerEnv);
+  assert.equal(gone.status, 404);
+});
+
 test('PUT prefs If-Match 412s on a stale etag', async () => {
   const workerEnv = env();
   const first = await handle(req('/v1/objects/prefs', {

@@ -1,8 +1,9 @@
 import { useStore, stripTransient } from '../store';
 import {
-  useProjects, registerProject,
+  useProjects, registerProject, deleteProject,
   loadProjectState, saveProjectState,
 } from '../store/projects';
+import { decideProjectSync } from './sync-decision';
 import { flushPendingWrites } from './persistence';
 import { internNodes } from './attachment-vault';
 import { toast, useUiStore } from './ui-store';
@@ -106,6 +107,15 @@ export function saveSyncConfig(cfg: SyncConfig | null): void {
   localStorage.removeItem(LEGACY_AREA_KEY);
 }
 
+/** Keep the last-known hash after the local canvas is gone, so the next
+    sync can DELETE the vault object instead of pulling it back. */
+export function rememberDeletedProject(id: string): void {
+  if (!loadSyncConfig()) return;
+  const rec = loadRecords()[id];
+  if (!rec) saveRecord(id, { hash: 'deleted', updatedAt: Date.now() });
+  schedule({ soon: true });
+}
+
 export function lastRemoteSyncAt(): number | null {
   const raw = localStorage.getItem(LAST_AT_KEY);
   const n = raw ? Number(raw) : NaN;
@@ -169,6 +179,13 @@ function loadRecords(): Record<string, PushRecord> {
 function saveRecord(id: string, rec: PushRecord): void {
   const all = loadRecords();
   all[id] = rec;
+  localStorage.setItem(RECORDS_KEY, JSON.stringify(all));
+}
+
+function dropRecord(id: string): void {
+  const all = loadRecords();
+  if (!(id in all)) return;
+  delete all[id];
   localStorage.setItem(RECORDS_KEY, JSON.stringify(all));
 }
 
@@ -238,6 +255,12 @@ async function putObject(
   if (!res.ok) throw new Error(await errorFrom(res));
   const json = await res.json() as { etag?: string };
   return json.etag || '';
+}
+
+async function deleteRemoteObject(endpoint: string, authToken: string, key: string): Promise<void> {
+  const res = await api(endpoint, authToken, `/v1/objects/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  if (res.status === 404) return;
+  if (!res.ok) throw new Error(await errorFrom(res));
 }
 
 async function errorFrom(res: Response): Promise<string> {
@@ -392,7 +415,7 @@ export async function testSyncConnection(cfg: SyncConfig): Promise<void> {
   if (!res.ok) throw new Error(await errorFrom(res));
 }
 
-export async function syncNow(opts: { silent?: boolean } = {}): Promise<{ pulled: number; pushed: number; conflicts: number } | null> {
+export async function syncNow(opts: { silent?: boolean } = {}): Promise<{ pulled: number; pushed: number; conflicts: number; deleted: number } | null> {
   if (isViewerMode) return null;
   const cfg = loadSyncConfig();
   if (!cfg) return null;
@@ -401,6 +424,7 @@ export async function syncNow(opts: { silent?: boolean } = {}): Promise<{ pulled
   let pulled = 0;
   let pushed = 0;
   let conflicts = 0;
+  let deleted = 0;
 
   pulled += await syncPrefs(cfg.endpoint, authToken, encKey, remote);
 
@@ -414,22 +438,29 @@ export async function syncNow(opts: { silent?: boolean } = {}): Promise<{ pulled
     if (result === 'pull') pulled += 1;
     if (result === 'push') pushed += 1;
     if (result === 'conflict') conflicts += 1;
+    if (result === 'deleted') deleted += 1;
   }
 
+  const localIds = new Set(localProjects.map((p) => p.id));
   for (const project of localProjects) {
     if (remoteIds.has(project.id)) continue;
-    const graph = await readLocalGraph(project.id);
-    if (!hasContent(graph)) continue;
-    await pushProject(cfg.endpoint, authToken, encKey, project.id, undefined);
-    pushed += 1;
+    const result = await syncLocalOnly(cfg.endpoint, authToken, encKey, project.id);
+    if (result === 'push') pushed += 1;
+    if (result === 'deleted') deleted += 1;
+  }
+
+  // Tombstones for canvases deleted here that never existed in the vault.
+  for (const id of Object.keys(loadRecords())) {
+    if (!remoteIds.has(id) && !localIds.has(id)) dropRecord(id);
   }
 
   markSynced();
   if (!opts.silent) {
     if (conflicts > 0) toast('info', fmt(t('sync.doneConflict'), { pulled, pushed, conflicts }), 8000);
+    else if (deleted > 0) toast('success', fmt(t('sync.doneDeleted'), { pulled, pushed, deleted }));
     else toast('success', fmt(t('sync.done'), { pulled, pushed }));
   }
-  return { pulled, pushed, conflicts };
+  return { pulled, pushed, conflicts, deleted };
 }
 
 async function syncPrefs(
@@ -496,51 +527,95 @@ async function putPrefs(
   }
 }
 
+async function localHashOf(graph: GraphState | null): Promise<string> {
+  if (!graph) return '';
+  return hashPayload({
+    nodes: slimAttachments(graph.nodes),
+    edges: graph.edges,
+    events: graph.events ?? [],
+  });
+}
+
 async function syncProject(
   endpoint: string,
   authToken: string,
   encKey: CryptoKey,
   id: string,
   info: SyncObjectInfo,
-): Promise<'pull' | 'push' | 'conflict' | 'same'> {
+): Promise<'pull' | 'push' | 'conflict' | 'same' | 'deleted'> {
   const localMeta = useProjects.getState().projects.find((p) => p.id === id);
   const graph = await readLocalGraph(id);
-  const localNodes = graph ? slimAttachments(graph.nodes) : [];
-  const localHash = graph
-    ? await hashPayload({ nodes: localNodes, edges: graph.edges, events: graph.events ?? [] })
-    : '';
+  const localHash = await localHashOf(graph);
   const last = loadRecords()[id];
-
-  if (!hasContent(graph)) {
-    await pullProject(endpoint, authToken, encKey, id);
-    return 'pull';
+  let remoteHash = info.hash || '';
+  if (!remoteHash) {
+    try {
+      const obj = await getObject(endpoint, authToken, projectObjectKey(id));
+      const snap = await decryptJson(encKey, obj.bytes) as ProjectSnapshot;
+      remoteHash = snap.hash || '';
+    } catch { /* list entry without a readable body: treat hash as unknown */ }
   }
+  const action = decideProjectSync({
+    localExists: !!localMeta,
+    remoteExists: true,
+    localHasContent: hasContent(graph),
+    lastHash: last?.hash ?? null,
+    localHash,
+    remoteHash,
+  });
 
-  if (info.hash && info.hash === localHash) {
-    saveRecord(id, { hash: localHash, updatedAt: localMeta?.updatedAt ?? Date.now() });
+  if (action === 'same') {
+    if (localHash) saveRecord(id, { hash: localHash, updatedAt: localMeta?.updatedAt ?? Date.now() });
     return 'same';
   }
-
-  const localChanged = !last || last.hash !== localHash;
-  const remoteChanged = !last || last.hash !== (info.hash || '');
-
-  const canvasName = localMeta?.name || 'canvas';
-  if (localChanged && remoteChanged) {
-    return keepRemoteAndForkLocal(endpoint, authToken, encKey, id, graph!, canvasName, localMeta?.kind, localHash);
+  if (action === 'delete-remote') {
+    await deleteRemoteObject(endpoint, authToken, projectObjectKey(id));
+    dropRecord(id);
+    return 'deleted';
   }
-
-  if (remoteChanged && !localChanged) {
+  if (action === 'pull') {
     await pullProject(endpoint, authToken, encKey, id);
     return 'pull';
   }
-
+  if (action === 'conflict') {
+    return keepRemoteAndForkLocal(endpoint, authToken, encKey, id, graph!, localMeta?.name || 'canvas', localMeta?.kind, localHash);
+  }
   try {
     await pushProject(endpoint, authToken, encKey, id, info.etag);
     return 'push';
   } catch (err) {
     if ((err as { code?: string }).code !== 'precondition') throw err;
-    return keepRemoteAndForkLocal(endpoint, authToken, encKey, id, graph!, canvasName, localMeta?.kind, localHash);
+    return keepRemoteAndForkLocal(endpoint, authToken, encKey, id, graph!, localMeta?.name || 'canvas', localMeta?.kind, localHash);
   }
+}
+
+async function syncLocalOnly(
+  endpoint: string,
+  authToken: string,
+  encKey: CryptoKey,
+  id: string,
+): Promise<'push' | 'same' | 'deleted'> {
+  const graph = await readLocalGraph(id);
+  const localHash = await localHashOf(graph);
+  const last = loadRecords()[id];
+  const action = decideProjectSync({
+    localExists: true,
+    remoteExists: false,
+    localHasContent: hasContent(graph),
+    lastHash: last?.hash ?? null,
+    localHash,
+    remoteHash: '',
+  });
+  if (action === 'delete-local') {
+    await deleteProject(id, { propagate: false });
+    dropRecord(id);
+    return 'deleted';
+  }
+  if (action === 'push') {
+    await pushProject(endpoint, authToken, encKey, id, undefined);
+    return 'push';
+  }
+  return 'same';
 }
 
 async function pullProject(endpoint: string, authToken: string, encKey: CryptoKey, id: string): Promise<void> {
@@ -590,14 +665,16 @@ async function pushProject(
 let timer: ReturnType<typeof setTimeout> | null = null;
 let watching = false;
 
-function schedule(): void {
+const DELETE_DEBOUNCE_MS = 1500;
+
+function schedule(opts?: { soon?: boolean }): void {
   if (!loadSyncConfig()) return;
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     void syncNow({ silent: true }).catch((err) => {
       console.warn('[thoughtdag] remote sync failed:', err);
     });
-  }, DEBOUNCE_MS);
+  }, opts?.soon ? DELETE_DEBOUNCE_MS : DEBOUNCE_MS);
 }
 
 export function bootRemoteSync(): void {
