@@ -31,12 +31,14 @@ jobs:
         run: npm test
 
       - name: Deploy Worker
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/sync
-          # 3.90.0 (action default) only reads wrangler.toml and fails with
-          # "Missing entry-point". jsonc support starts at 3.91; v4 is current.
-          wranglerVersion: "4"
           command: deploy
+        env:
+          # wrangler 4 refuses to run in CI unless the token is in the
+          # environment; the action input alone is not enough.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
