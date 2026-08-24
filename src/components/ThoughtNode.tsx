@@ -102,7 +102,13 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
   });
   const occupyH = Math.max(height ?? 0, occupyHFromStore);
   const updateNodeInternals = useUpdateNodeInternals();
-  useEffect(() => { updateNodeInternals(id); }, [glyphTier, id, updateNodeInternals]);
+  // Handles live on the card, the wrapper is the occupancy box. LOD swaps
+  // and zoom-in can move the card inside a still-tall wrapper — force a
+  // remasure so edges reattach. rAF waits for the height style to apply.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => updateNodeInternals(id));
+    return () => cancelAnimationFrame(frame);
+  }, [zoomTier, zoomedOut, occupyH, id, updateNodeInternals]);
   // Upstream changed since this answer was written (see recomputeStaleness)
   const isStale = useStore((s) => s.staleIds.includes(id));
   // Lit while its condense-dialog segment row is hovered — the list points,

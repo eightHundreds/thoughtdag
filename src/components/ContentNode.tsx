@@ -49,7 +49,10 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
   });
   const occupyH = Math.max(height ?? 0, occupyHFromStore);
   const updateNodeInternals = useUpdateNodeInternals();
-  useEffect(() => { updateNodeInternals(id); }, [glyphTier, id, updateNodeInternals]);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => updateNodeInternals(id));
+    return () => cancelAnimationFrame(frame);
+  }, [zoomTier, zoomedOut, occupyH, glyphTier, id, updateNodeInternals]);
 
   const kind = data.stepKind === 'file' ? 'file' : data.stepKind === 'link' ? 'link' : 'note';
   const [editing, setEditing] = useState(!isViewerMode && kind === 'note' && !data.question);

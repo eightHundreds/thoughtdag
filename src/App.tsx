@@ -47,7 +47,8 @@ import { exportActiveParadigm, exportActiveProjectJson, exportEventLogCsv } from
 import { countTokens } from './utils';
 import { buildExampleGraph } from './lib/example-graph';
 import { COLORS, FRAME_COLORS, PANEL_INSET } from './lib/constants';
-import { estimateNodeHeight } from './lib/layout';
+import { lockWorkWrapper, unlockWorkWrapper } from './lib/layout';
+import { liftWheelBlocks, wheelConsumedByScroll } from './lib/wheel-over-card';
 import { panelShift } from './lib/panel-shift';
 import { migrateActiveCanvasToVault, gcVaultAtBoot } from './lib/attachment-vault-boot';
 import { consumeOpenRouterCallback, startOpenRouterOAuth } from './lib/openrouter-oauth';
@@ -1796,40 +1797,38 @@ function Canvas() {
 function ZoomTierTag() {
   const tier = useZoomTier();
   const zoom = useRfStore((s) => s.transform[2]);
-  const prevTier = useRef<typeof tier>('work');
+  const prevTier = useRef<typeof tier | null>(null);
   useEffect(() => {
     const root = document.querySelector('.react-flow') as HTMLElement | null;
     if (!root) return;
-    // nowheel is for scrolling TEXT. A trackpad pinch is wheel+ctrlKey;
-    // React Flow treats that as nowheel too and zoom dies over the card
-    // body. Lift the class in capture so pinch / Ctrl-wheel still zoom.
+    // nowheel/nopan are for scrolling TEXT. They also swallow Mac two-finger
+    // pan (a wheel event) and pinch-zoom over an idle follow-up / short
+    // answer. Lift both in capture unless the box can actually scroll this
+    // gesture — then React Flow's filter sees a free pane.
     const onWheel = (e: Event) => {
       const we = e as WheelEvent;
-      if (!we.ctrlKey && !we.metaKey) return;
-      const hit = (we.target as HTMLElement | null)?.closest?.('.nowheel');
-      if (!hit) return;
-      hit.classList.remove('nowheel');
-      requestAnimationFrame(() => hit.classList.add('nowheel'));
+      const target = we.target;
+      if (!(we.ctrlKey || we.metaKey) && wheelConsumedByScroll(target, we)) return;
+      liftWheelBlocks(target, root);
     };
     root.addEventListener('wheel', onWheel, { capture: true, passive: true });
     return () => root.removeEventListener('wheel', onWheel, { capture: true });
   }, []);
   useEffect(() => {
     document.querySelector('.react-flow')?.setAttribute('data-zoom-tier', tier);
-    // Leaving work: lift any LOD-shrunk height leftover from old sessions
-    // so the React Flow wrapper cannot clamp the reserved box.
-    if (tier !== 'work' && prevTier.current === 'work') {
-      const cur = useStore.getState().nodes;
-      const next = cur.map((n) => {
-        const kind = n.data.stepKind;
-        if (kind === 'frame' || kind === 'note' || kind === 'file' || kind === 'link') return n;
-        const floor = n.data.isCollapsed ? 80 : estimateNodeHeight(n);
-        if ((n.height ?? 0) >= floor) return n;
-        return { ...n, height: floor };
-      });
-      if (next.some((n, i) => n !== cur[i])) useStore.getState().setNodes(next);
-    }
+    const prev = prevTier.current;
     prevTier.current = tier;
+    // First paint is not a zoom transition — treating it as "leaving work"
+    // used to stamp the char-count estimate onto every card, which is what
+    // left a hollow wrapper and a floating wire after zoom-in.
+    if (prev === null || prev === tier) return;
+    const cur = useStore.getState().nodes;
+    const next = tier === 'work'
+      ? cur.map(unlockWorkWrapper)
+      : prev === 'work'
+        ? cur.map(lockWorkWrapper)
+        : cur;
+    if (next.some((n, i) => n !== cur[i])) useStore.getState().setNodes(next);
   }, [tier]);
   useEffect(() => {
     (document.querySelector('.react-flow') as HTMLElement | null)?.style.setProperty('--tdag-zoom', String(zoom));

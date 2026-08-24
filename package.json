@@ -9,7 +9,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "smoke": "node scripts/smoke.mjs",
-    "test": "node --test scripts/test-sync-worker.mjs scripts/test-sync-decision.mjs",
+    "test": "node --test scripts/test-sync-worker.mjs scripts/test-sync-decision.mjs scripts/test-layout.mjs scripts/test-wheel-over-card.mjs",
     "preview": "vite preview",
     "desktop": "npm run build && cd desktop && electron ."
   },
