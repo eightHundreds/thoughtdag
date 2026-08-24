@@ -222,6 +222,35 @@ test('PUT prefs If-Match 412s on a stale etag', async () => {
   assert.equal(stale.status, 412);
 });
 
+test('PUT object name travels as ?name= so CJK does not trip Headers()', async () => {
+  const workerEnv = env();
+  const name = '我的画布';
+  const put = await handle(req(`/v1/objects/project-zh?name=${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      'If-None-Match': '*',
+      'Content-Type': 'application/octet-stream',
+    },
+    body: new Uint8Array([1]),
+  }), workerEnv);
+  assert.equal(put.status, 200);
+
+  const listed = await handle(req('/v1/objects', {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+  }), workerEnv);
+  assert.equal(listed.status, 200);
+  const body = await listed.json();
+  assert.equal(body.objects[0].key, 'project-zh');
+  assert.equal(body.objects[0].name, name);
+
+  const get = await handle(req('/v1/objects/project-zh', {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+  }), workerEnv);
+  assert.equal(get.status, 200);
+  assert.equal(decodeURIComponent(get.headers.get('X-Object-Name') || ''), name);
+});
+
 test('POST /api/probe-models is the proxy, not the vault', async () => {
   const res = await handle(req('/api/probe-models', {
     method: 'POST',

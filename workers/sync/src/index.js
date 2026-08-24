@@ -112,7 +112,11 @@ async function putObject(request, env, ns, key, r2Key) {
   }
 
   const customMetadata = {};
-  const name = request.headers.get('X-Object-Name');
+  // Canvas names are Unicode (often CJK). HTTP headers are Latin-1, so the
+  // client sends `?name=` instead of X-Object-Name. The header is still
+  // accepted for older clients that only ever sent ASCII.
+  const url = new URL(request.url);
+  const name = url.searchParams.get('name') || request.headers.get('X-Object-Name');
   const updatedAt = request.headers.get('X-Object-Updated-At');
   const hash = request.headers.get('X-Object-Hash');
   const kind = request.headers.get('X-Object-Kind');
@@ -161,7 +165,8 @@ function objectHeaders(request, obj) {
     ETag: obj.httpEtag,
     'Cache-Control': 'private, no-store',
     Pragma: 'no-cache',
-    'X-Object-Name': meta.name || '',
+    // Percent-encode: Response Headers() also rejects non-Latin-1.
+    'X-Object-Name': meta.name ? encodeURIComponent(meta.name) : '',
     'X-Object-Updated-At': meta.updatedAt || '',
     'X-Object-Hash': meta.hash || '',
     'X-Object-Kind': meta.kind || '',

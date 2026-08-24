@@ -29,7 +29,9 @@ and gets `401 unauthorized` (CORS preflight also omits POST).
 
 CORS preflight on `/v1/*` must allow every header the Pages client
 sends (`Authorization`, `Cache-Control`, the `If-*` / `X-Object-*`
-family). `npm test` (`scripts/test-sync-worker.mjs`) locks that.
+family). Canvas names go on the PUT query string (`?name=`), not
+`X-Object-Name`, because HTTP headers are Latin-1. `npm test`
+(`scripts/test-sync-worker.mjs`) locks that.
 
 Do **not** set `SYNC_TOKEN`. Users type their own area name in the app.
 

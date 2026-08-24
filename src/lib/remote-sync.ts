@@ -202,6 +202,11 @@ async function api(
   return res;
 }
 
+function decodeHeaderName(raw: string | null): string | undefined {
+  if (!raw) return undefined;
+  try { return decodeURIComponent(raw); } catch { return raw; }
+}
+
 async function listObjects(endpoint: string, authToken: string): Promise<SyncObjectInfo[]> {
   const res = await api(endpoint, authToken, '/v1/objects');
   if (!res.ok) throw new Error(await errorFrom(res));
@@ -220,7 +225,7 @@ async function getObject(endpoint: string, authToken: string, key: string): Prom
       size: Number(res.headers.get('Content-Length') || 0),
       etag: (res.headers.get('ETag') || '').replaceAll('"', ''),
       updatedAt: res.headers.get('X-Object-Updated-At') || undefined,
-      name: res.headers.get('X-Object-Name') || undefined,
+      name: decodeHeaderName(res.headers.get('X-Object-Name')),
       hash: res.headers.get('X-Object-Hash') || undefined,
       kind: res.headers.get('X-Object-Kind') || undefined,
     },
@@ -236,13 +241,13 @@ async function putObject(
   etag?: string,
 ): Promise<string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' };
-  if (meta.name) headers['X-Object-Name'] = meta.name;
   if (meta.updatedAt) headers['X-Object-Updated-At'] = meta.updatedAt;
   if (meta.hash) headers['X-Object-Hash'] = meta.hash;
   if (meta.kind) headers['X-Object-Kind'] = meta.kind;
   if (etag) headers['If-Match'] = etag;
   else headers['If-None-Match'] = '*';
-  const res = await api(endpoint, authToken, `/v1/objects/${encodeURIComponent(key)}`, {
+  const qs = meta.name ? `?name=${encodeURIComponent(meta.name)}` : '';
+  const res = await api(endpoint, authToken, `/v1/objects/${encodeURIComponent(key)}${qs}`, {
     method: 'PUT',
     headers,
     body: body as unknown as BodyInit,
