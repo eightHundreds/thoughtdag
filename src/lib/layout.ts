@@ -9,6 +9,7 @@ export {
   nodeHeight,
   unlockWorkWrapper,
   lockWorkWrapper,
+  insertNodeLocally,
 } from './occupancy';
 
 /**
@@ -43,7 +44,7 @@ export function autoLayout(allNodes: ThoughtNode[], allEdges: ThoughtEdge[]): Th
   const NODE_WIDTH = LAYOUT_COL_WIDTH;
   const H_GAP = LAYOUT_H_GAP;
   const V_GAP = LAYOUT_V_GAP;
-  const V_PAD = 24; // extra vertical padding for collision
+  const V_PAD = LAYOUT_V_GAP; // same air as the chain — 24px packed folded cards flush
 
   // --- Structural edges (no cross-links) ---
   // Structural edges drive the column tree. Cross-links normally don't —

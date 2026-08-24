@@ -1,8 +1,8 @@
-import type { ThoughtNode } from '../types';
+import type { ThoughtNode, ThoughtEdge } from '../types';
 
 // Keep in sync with COLLAPSED_NODE_HEIGHT in constants.ts — this file stays
 // a leaf so node:test can import it without evaluating Vite env.
-const COLLAPSED_NODE_HEIGHT = 80;
+const COLLAPSED_NODE_HEIGHT = 140;
 
 // Estimated rendered height of a node — fallback when React Flow hasn't
 // measured the DOM yet (fresh nodes) and for collapse shifting. Every
@@ -34,7 +34,11 @@ export function occupancyHeight(node: Pick<ThoughtNode, 'data' | 'measured' | 'h
     return stored || 120;
   }
   if (node.data?.isCollapsed) {
-    return stored > 0 && stored < COLLAPSED_NODE_HEIGHT + 40 ? stored : COLLAPSED_NODE_HEIGHT;
+    // A folded card measures ~120–180px. A leftover expanded stamp is 220+.
+    // Trust a collapsed-sized measurement; otherwise use the folded estimate
+    // — treating 140 as "too tall to be folded" packed chains on 一键排版.
+    if (stored >= 70 && stored <= 200) return stored;
+    return COLLAPSED_NODE_HEIGHT;
   }
   // Prefer the stamped work-tier box. A leftover plaque/glyph measurement
   // (~128–176px) is not occupancy — fall back to the work-card estimate.
@@ -71,4 +75,159 @@ export function lockWorkWrapper(node: ThoughtNode): ThoughtNode {
   const floor = occupancyHeight(node);
   if ((node.height ?? 0) >= floor) return node;
   return { ...node, height: floor };
+}
+
+// ── Local insert ──────────────────────────────────────────────────────
+// Full autoLayout rewrites every thought-node's x/y. Asking a follow-up
+// must not do that: other trees keep the positions the user dragged them
+// to. This places ONE new card by the arrow grammar (same column under
+// the parent for a continuation, next column for a sibling / explore)
+// and only shifts descendants of that parent when they would overlap.
+
+const CONTENT_KINDS = new Set(['note', 'file', 'link', 'frame']);
+const COL_PITCH = 540 + 48;
+const V_GAP = 72;
+const V_PAD = 24;
+const SAME_COL = 200;
+
+function isContent(n: ThoughtNode): boolean {
+  return CONTENT_KINDS.has(n.data.stepKind ?? '');
+}
+
+function descendantIds(startId: string, edges: ThoughtEdge[], skip?: string): string[] {
+  const out: string[] = [];
+  const queue = [startId];
+  const seen = new Set<string>(skip ? [skip] : []);
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const e of edges) {
+      if (e.source !== current || e.data?.isCrossLink) continue;
+      if (seen.has(e.target)) continue;
+      seen.add(e.target);
+      out.push(e.target);
+      queue.push(e.target);
+    }
+  }
+  return out;
+}
+
+export interface InsertLocalOpts {
+  parentId?: string | null;
+  /** Extra parents for multi-select explore / merge (first is the column). */
+  parentIds?: string[];
+  branch?: boolean;
+  collapseParent?: boolean;
+}
+
+export function insertNodeLocally(
+  allNodes: ThoughtNode[],
+  allEdges: ThoughtEdge[],
+  newId: string,
+  opts: InsertLocalOpts = {},
+): ThoughtNode[] {
+  const fresh = allNodes.find((n) => n.id === newId);
+  if (!fresh) return allNodes;
+
+  let nodes = allNodes;
+  const parentIds = [
+    ...new Set(
+      [...(opts.parentIds ?? []), opts.parentId ?? '']
+        .filter((id): id is string => !!id && id !== newId),
+    ),
+  ];
+  const parent = parentIds[0] ? nodes.find((n) => n.id === parentIds[0]) : undefined;
+
+  if (opts.collapseParent && parent && !parent.data.isCollapsed && !isContent(parent)) {
+    const oldH = occupancyHeight(parent);
+    const collapsed: ThoughtNode = {
+      ...parent,
+      height: COLLAPSED_NODE_HEIGHT,
+      measured: { width: parent.measured?.width ?? 520, height: COLLAPSED_NODE_HEIGHT },
+      data: { ...parent.data, isCollapsed: true },
+    };
+    const delta = occupancyHeight(collapsed) - oldH;
+    const desc = new Set(descendantIds(parent.id, allEdges, newId));
+    nodes = nodes.map((n) => {
+      if (n.id === parent.id) return collapsed;
+      if (delta !== 0 && desc.has(n.id)) {
+        return { ...n, position: { ...n.position, y: n.position.y + delta } };
+      }
+      return n;
+    });
+  }
+
+  const parentNow = parentIds[0] ? nodes.find((n) => n.id === parentIds[0]) : undefined;
+  const others = nodes.filter((n) => n.id !== newId && !isContent(n));
+
+  let x: number;
+  let y: number;
+
+  if (!parentNow) {
+    if (others.length === 0) {
+      x = 0;
+      y = 0;
+    } else {
+      const right = others.reduce((a, b) => (a.position.x >= b.position.x ? a : b));
+      x = right.position.x + COL_PITCH;
+      y = Math.min(...others.map((n) => n.position.y));
+    }
+  } else if (parentIds.length > 1) {
+    const parents = parentIds
+      .map((id) => nodes.find((n) => n.id === id))
+      .filter((n): n is ThoughtNode => !!n);
+    x = parentNow.position.x;
+    y = Math.max(...parents.map((p) => p.position.y + occupancyHeight(p))) + V_GAP;
+  } else {
+    const pH = occupancyHeight(parentNow);
+    const outgoing = allEdges.filter(
+      (e) => e.source === parentNow.id && e.target !== newId && !e.data?.isCrossLink && !e.data?.isWatch,
+    );
+    const exploreIds = new Set(
+      outgoing.filter((e) => e.data?.isBranchFromSelection).map((e) => e.target),
+    );
+    const nonExplore = outgoing.map((e) => e.target).filter((id) => !exploreIds.has(id));
+    const isBranch = !!opts.branch;
+
+    if (isBranch) {
+      const side = nodes.filter((n) => outgoing.some((e) => e.target === n.id) || n.id === parentNow.id);
+      const rightmost = side.reduce((a, b) => (a.position.x >= b.position.x ? a : b));
+      x = rightmost.position.x + COL_PITCH;
+      y = parentNow.position.y + pH * 0.25;
+    } else if (nonExplore.length === 0) {
+      x = parentNow.position.x;
+      y = parentNow.position.y + pH + V_GAP;
+    } else {
+      const sibs = nodes.filter((n) => nonExplore.includes(n.id));
+      const rightmost = sibs.reduce((a, b) => (a.position.x >= b.position.x ? a : b));
+      x = rightmost.position.x + COL_PITCH;
+      y = sibs[0]?.position.y ?? parentNow.position.y + pH + V_GAP;
+    }
+  }
+
+  nodes = nodes.map((n) => (n.id === newId ? { ...n, position: { x, y } } : n));
+
+  // Same-chain only: push descendants of the parent (or the new root's
+  // future neighbors are NOT moved) that now overlap the new card.
+  const chainIds = new Set(
+    parentNow ? descendantIds(parentNow.id, allEdges, newId) : [],
+  );
+  const placed = nodes.find((n) => n.id === newId)!;
+  const placedBottom = placed.position.y + occupancyHeight(placed) + V_PAD;
+  let push = 0;
+  for (const n of nodes) {
+    if (!chainIds.has(n.id)) continue;
+    if (Math.abs(n.position.x - placed.position.x) >= SAME_COL) continue;
+    if (n.position.y >= placed.position.y && n.position.y < placedBottom) {
+      push = Math.max(push, placedBottom - n.position.y);
+    }
+  }
+  if (push > 0) {
+    nodes = nodes.map((n) =>
+      chainIds.has(n.id) && Math.abs(n.position.x - placed.position.x) < SAME_COL && n.position.y >= placed.position.y
+        ? { ...n, position: { ...n.position, y: n.position.y + push } }
+        : n,
+    );
+  }
+
+  return nodes;
 }

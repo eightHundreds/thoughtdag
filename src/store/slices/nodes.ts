@@ -2,7 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { ThoughtNode, ThoughtEdge } from '../../types';
 import { generateId, countTokens } from '../../utils';
 import { COLORS } from '../../lib/constants';
-import { autoLayout, estimateNodeHeight, nodeHeight } from '../../lib/layout';
+import { autoLayout, estimateNodeHeight, insertNodeLocally, nodeHeight } from '../../lib/layout';
 import { getDescendantIds, walkUpAncestors } from '../../lib/graph';
 import { referenceBlockContent, upstreamFingerprint, buildContext } from '../context-builder';
 import { pruneHighlights } from '../../lib/highlight-match';
@@ -153,7 +153,10 @@ export const createNodeSlice: StateCreator<StoreState, [], [], NodeSlice> = (set
       target: id,
     } : null;
     const newEdges = newEdge ? [...get().edges, newEdge] : get().edges;
-    const newNodes = autoLayout([...get().nodes, newNode], newEdges);
+    const newNodes = insertNodeLocally([...get().nodes, newNode], newEdges, id, {
+      parentId: parentEdge?.source,
+      branch: !!parentEdge?.data?.isBranchFromSelection,
+    });
     set({ nodes: newNodes, edges: newEdges, selectedNodeId: id });
     get().pushHistory();
   },

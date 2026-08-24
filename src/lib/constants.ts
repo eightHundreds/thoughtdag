@@ -46,7 +46,9 @@ export const LAYOUT_H_GAP = 48;
 export const LAYOUT_V_GAP = 72;
 
 // Collapsed node card height, used by layout estimation and collapse shifting.
-export const COLLAPSED_NODE_HEIGHT = 80;
+// Header (~52) + question line + two-line summary + paddings ≈ 140. 80 was
+// the chrome-only guess and packed folded cards on top of each other.
+export const COLLAPSED_NODE_HEIGHT = 140;
 
 // JS mirror of the @theme design tokens in src/index.css — for ReactFlow
 // edge styles / markers / minimap, which take literal color values.
