@@ -315,6 +315,8 @@ export const en = {
   'content.reExtractAgain': 'Re-extract',
   'content.noVisionModel': 'No vision model available: images can\'t be auto-understood. Connect a vision-capable model (toolbar model menu → provider setup; GLM-4V Flash has a free tier).',
   'error.textOnlyModelImages': 'This model cannot read images. Switch to one with the vision badge, or connect a vision model (GLM-4V Flash has a free tier) and use Recognize in the reader to turn the image into text.',
+  'error.directCors': 'The browser could not reach this model gateway. Usually the gateway does not allow this page origin (CORS), or the network cannot get there. Allow this origin (authorization + content-type) on the gateway, or use a provider that already permits browser access.',
+  'error.noDirectProvider': 'No browser-direct model is configured. Connect a provider in settings and pick a model.',
   'content.extractFailed': 'Image extraction failed (all vision models tried)',
   'content.extractFellBack': 'Fell back to',
   'content.extractPrompt': 'First classify this image: photo / UI screenshot / diagram or flowchart / scientific figure / text document. Then extract at the finest depth for that type:\n- Scientific figure: chart type, every axis with units, legend, panel structure (what a/b/c each show), main trends and effect directions, notable outliers; do NOT invent precise values you cannot read\n- Diagram/flowchart: list every component and their connections/causal links\n- Document/screenshot: transcribe ALL visible text verbatim, preserving structure (headings, lists, tables)\n- Photo: objects and scene description, plus any visible text transcribed\nOutput the extraction itself only: no preamble, no summary.',

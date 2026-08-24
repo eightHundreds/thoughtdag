@@ -644,6 +644,43 @@ app.post('/api/fetch-url', async (req, res) => {
   }
 });
 
+// Sidecar search for browser-direct generation (same contract as the Worker).
+app.post('/api/search', async (req, res) => {
+  const { tool, query, anysearchKey, providers, searchEngine } = req.body ?? {};
+  const q = String(query ?? '').trim();
+  if (!q) { res.status(400).json({ error: 'query required' }); return; }
+  const name = String(tool || '');
+  if (!['web_search', 'arxiv_search', 'semantic_scholar'].includes(name)) {
+    res.status(400).json({ error: 'unknown tool' }); return;
+  }
+  const sources = [];
+  const pushNumbered = (results) => {
+    const start = sources.length;
+    sources.push(...results);
+    if (results.length === 0) return 'No results found.';
+    return results
+      .map((r, i) => `[${start + i + 1}] ${r.title}${r.authors ? ` — ${r.authors}` : ''}${r.date ? ` (${r.date})` : ''}\n${r.url ?? ''}\n${r.content}`)
+      .join('\n\n');
+  };
+  try {
+    let results;
+    if (name === 'web_search') {
+      const glm = findGlmSearch(providers);
+      const engine = searchEngine || SEARCH_ENGINE;
+      const useAnysearch = engine === 'anysearch' || (!ZHIPU_KEY && !glm);
+      if (useAnysearch) results = await anySearchWeb(q, 5, anysearchKey || ANYSEARCH_KEY);
+      else results = await zhipuWebSearch(q, 5, engine, ZHIPU_KEY ? null : glm);
+    } else if (name === 'arxiv_search') {
+      results = await arxivSearch(q);
+    } else {
+      results = await semanticScholarSearch(q);
+    }
+    res.json({ text: pushNumbered(results), sources });
+  } catch (e) {
+    res.json({ text: `Search failed (${e.message}) — try a different tool or answer from your knowledge.`, sources: [] });
+  }
+});
+
 // List available models
 // Connected external tool servers — the UI shows an MCP toggle when non-empty
 app.get('/api/tools', (req, res) => {

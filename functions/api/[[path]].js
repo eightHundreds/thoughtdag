@@ -251,6 +251,44 @@ function makeTools(sources, onSearch, prefs = {}) {
   return Object.keys(tools).length > 0 ? tools : undefined;
 }
 
+function numberSearchResults(sources, results) {
+  const start = sources.length;
+  sources.push(...results);
+  if (results.length === 0) return 'No results found.';
+  return results
+    .map((r, i) => `[${start + i + 1}] ${r.title}${r.authors ? ` — ${r.authors}` : ''}${r.date ? ` (${r.date})` : ''}\n${r.url ?? ''}\n${r.content}`)
+    .join('\n\n');
+}
+
+// Sidecar for browser-direct generation: the model loop stays in the
+// page; only the search HTTP (no CORS, no SSRF from the origin) runs here.
+async function handleSearch(body) {
+  const { tool, query, anysearchKey, providers, searchEngine } = body ?? {};
+  const q = String(query ?? '').trim();
+  if (!q) return json({ error: 'query required' }, 400);
+  const name = String(tool || '');
+  if (!['web_search', 'arxiv_search', 'semantic_scholar'].includes(name)) {
+    return json({ error: 'unknown tool' }, 400);
+  }
+  const sources = [];
+  try {
+    let results;
+    if (name === 'web_search') {
+      const glm = findGlmSearch(providers);
+      const useAnysearch = anysearchKey && (searchEngine === 'anysearch' || !glm);
+      if (!useAnysearch && !glm) return json({ error: 'no web search engine configured' }, 400);
+      results = useAnysearch ? await anySearchWeb(anysearchKey, q) : await glmWebSearch(glm, q);
+    } else if (name === 'arxiv_search') {
+      results = await arxivSearch(q);
+    } else {
+      results = await semanticScholarSearch(q);
+    }
+    return json({ text: numberSearchResults(sources, results), sources });
+  } catch (e) {
+    return json({ text: `Search failed (${e.message}) — try a different tool or answer from your knowledge.`, sources: [] });
+  }
+}
+
 // ── routes ──
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
@@ -600,6 +638,7 @@ export async function onRequest({ request, params }) {
       models: (Array.isArray(body.models) && body.models.length > 0 ? body.models : ['openrouter/auto']).map((id) => (typeof id === 'string' ? { id } : id)),
     }] : []));
     case '/fetch-url': return handleFetchUrl(body);
+    case '/search': return handleSearch(body);
     case '/pdf-extract': return json({ error: 'PDF extraction runs on the local proxy only — the file still attaches; text extraction is skipped on the demo deployment.' }, 501);
     default: return json({ error: 'Not found' }, 404);
   }

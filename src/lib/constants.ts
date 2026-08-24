@@ -1,8 +1,8 @@
-// Base URL of the LLM proxy. Dev defaults to the local server.mjs; a
-// same-origin production build (the original Workers demo) leaves this
-// empty so /api/* hits the sibling worker. GitHub Pages has no proxy, so
-// it falls through to this fork's hosted worker. Override with VITE_API_BASE
-// when the proxy runs elsewhere (e.g. a static build against a LAN proxy).
+// Base URL of the sidecar proxy (search, link snapshots, /models CORS
+// fallback, R2 sync). Dev defaults to local server.mjs. GitHub Pages has
+// no Node server, so it falls through to this fork's hosted worker.
+// Generation itself is browser→gateway on hosted; the Worker is not on
+// that path. Override with VITE_API_BASE when the sidecar runs elsewhere.
 const HOSTED_API = 'https://thoughtdag-sync.mingoing9610.workers.dev';
 
 function computeApiBase(): string {
@@ -15,8 +15,9 @@ function computeApiBase(): string {
 
 export const API_BASE = computeApiBase();
 
-/** True when generations / probes go through the hosted Workers proxy
-    (same-origin demo or a remote workers.dev), not the local Node server. */
+/** True on the hosted deployment (Pages / workers.dev), not the local
+    Node server. Hosted generation is browser-direct; this flag picks
+    that lane and the Worker sidecar for search / snapshots. */
 export function isHostedProxy(): boolean {
   if (typeof location === 'undefined') return false;
   const loopback = new Set(['localhost', '127.0.0.1', '[::1]']);

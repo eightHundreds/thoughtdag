@@ -36,4 +36,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/sync
+          # 3.90.0 (action default) only reads wrangler.toml and fails with
+          # "Missing entry-point". jsonc support starts at 3.91; v4 is current.
+          wranglerVersion: "4"
           command: deploy

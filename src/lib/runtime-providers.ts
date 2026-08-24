@@ -2,6 +2,7 @@ import { API_BASE, isHostedProxy } from './constants';
 import { errorText } from './error-text';
 import { t } from '../i18n';
 import type { ModelData } from './use-models';
+import { catalogFromProviders, decorateVision, parseProbePayload } from './provider-catalog';
 
 // Browser-configured model providers: the .env-free path in. Anything that
 // speaks the OpenAI-compatible protocol fits one shape — baseURL + key +
@@ -112,12 +113,11 @@ export function saveProviders(providers: RuntimeProvider[]): void {
   localStorage.setItem(LS_KEY, JSON.stringify(providers));
 }
 
-/** Register the full provider set on the proxy; returns the refreshed model list. */
+/** Build the picker catalog. Hosted: computed locally (generation is
+    browser-direct). Local Node proxy: still asked, so .env models merge. */
 export async function pushProviders(providers: RuntimeProvider[]): Promise<ModelData> {
-  // read the AnySearch key straight from storage (no ui-store import — this
-  // module sits below the store): the hosted worker lights the engine up
-  // in its capability report when a key rides along.
   const anysearchKey = localStorage.getItem('thoughtdag.anysearchKey') || undefined;
+  if (isHostedProxy()) return catalogFromProviders(providers, anysearchKey);
   const res = await fetch(`${API_BASE}/api/runtime-providers`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -131,16 +131,11 @@ export async function pushProviders(providers: RuntimeProvider[]): Promise<Model
   return { models: d.models ?? [], default: d.default ?? null, capabilities: d.capabilities };
 }
 
-// Vision families recognizable from the id alone. Only OpenRouter's /models
-// route ships modality metadata; every other provider answers with bare ids,
-// which used to bury real vision models (a directly-connected glm-4v-flash
-// carried no badge and the Recognize button never appeared). The hint only
-// ever ADDS vision — metadata, when present, always wins, and unknown stays
-// unknown rather than false.
-const VISION_ID_HINT = /gemini|gpt-4o|gpt-4\.1|gpt-5|claude|glm-4v|qwen[\w.-]*-vl|qvq|llava|pixtral|minicpm-v|internvl|kimi-latest|-vision|vision-/i;
+function isProbeUpstreamError(message: string): boolean {
+  return /key was rejected|endpoint answered HTTP|requires an API key/i.test(message);
+}
 
-/** Ask an endpoint what models it serves (the /models protocol standard). */
-export async function probeModels(baseURL: string, apiKey: string): Promise<RuntimeModel[]> {
+async function probeModelsViaProxy(baseURL: string, apiKey: string): Promise<RuntimeModel[]> {
   const res = await fetch(`${API_BASE}/api/probe-models`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -156,11 +151,35 @@ export async function probeModels(baseURL: string, apiKey: string): Promise<Runt
     }
     throw new Error(raw);
   }
-  const models = ((await res.json()).models ?? []) as RuntimeModel[];
-  for (const m of models) {
-    if (m.vision === undefined && VISION_ID_HINT.test(m.id)) m.vision = true;
+  return decorateVision(((await res.json()).models ?? []) as RuntimeModel[]);
+}
+
+/** Ask an endpoint what models it serves. Try the browser first; fall
+    back to the proxy sidecar when CORS/network blocks the gateway. */
+export async function probeModels(baseURL: string, apiKey: string): Promise<RuntimeModel[]> {
+  try {
+    const r = await fetch(`${String(baseURL).replace(/\/$/, '')}/models`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!r.ok) {
+      let detail = '';
+      try {
+        const errBody = await r.json() as { error?: { message?: string } | string; message?: string };
+        const raw = (typeof errBody?.error === 'string' ? errBody.error : errBody?.error?.message) ?? errBody?.message ?? '';
+        if (typeof raw === 'string') detail = raw.trim();
+      } catch { /* non-JSON error bodies stay unnamed */ }
+      const hint = (r.status === 401 || r.status === 403)
+        ? (apiKey ? 'the key was rejected' : 'this endpoint requires an API key')
+        : `endpoint answered HTTP ${r.status}`;
+      throw new Error(detail ? `${hint}: ${detail}` : hint);
+    }
+    return decorateVision(parseProbePayload(await r.json()) as RuntimeModel[]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (isProbeUpstreamError(message)) throw err instanceof Error ? err : new Error(message);
+    return probeModelsViaProxy(baseURL, apiKey);
   }
-  return models;
 }
 
 /** A window the model's own id promises (k3-256k, moonshot-v1-128k…).

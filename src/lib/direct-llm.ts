@@ -2,53 +2,41 @@ import type { ContextMessage, ImageAttachment, StreamCallbacks } from './api';
 import type { Reference } from '../types';
 import { isHostedProxy } from './constants';
 import { storedProviders, type RuntimeProvider } from './runtime-providers';
+import { isOpenRouterURL, pickDirectProvider, providerHasGlmSearch } from './provider-catalog';
+import {
+  SEARCH_TOOL_DEFS,
+  SEARCH_TOOL_NAMES,
+  TOOL_LOOP_DIRECTIVE,
+  sidecarSearch,
+  type SearchHit,
+  type SearchToolName,
+} from './sidecar-search';
+import { t } from '../i18n';
 
-// Direct browser→gateway streaming. On the Workers deployment the proxy has
-// a small per-request CPU allowance; big contexts + thinking models exhaust
-// it and the stream dies mid-thought with no error frame. When the selected
-// model belongs to a browser-configured OpenRouter provider, the app talks
-// to the gateway directly instead (its API supports CORS) — the key never
-// leaves the browser and context size is no longer bounded by proxy CPU.
-// Local dev keeps the Node proxy: no CPU cap there, plus the richer tool
-// loop (web_search / arxiv / scholar / MCP).
+// Direct browser→gateway streaming. On the hosted deployment the Worker
+// CPU allowance kills long thinking streams, so generation talks to the
+// gateway from the browser. The Worker stays as a sidecar for the few
+// calls browsers cannot make (search APIs, arbitrary URL snapshots,
+// /models CORS fallback). Local dev keeps the Node proxy: no CPU cap,
+// plus MCP / vision reroute / the richer tool loop in one hop.
 
-// Same-origin alone is NOT "the worker": the desktop shell serves same-origin
-// from a loopback address, and its bundled server has no CPU allowance and
-// the full tool loop (search / scholar / MCP / vision reroute) — bypassing it
-// would throw all of that away for nothing. Only the hosted deployment needs
-// the direct lanes.
 const isWorkerBackend = isHostedProxy();
 
-// Endpoints verified to allow browser CORS: OpenRouter (documented),
-// Moonshot (preflight tested against .cn with the app origin), and DeepSeek
-// (preflight tested 2026-08-02 incl. the x-title header — their thinking
-// models are exactly the ones the worker CPU allowance kills). Others keep
-// the proxy until tested — a CORS-blocked endpoint would fail 100% direct.
-const DIRECT_CORS_OK = /openrouter\.ai|api\.moonshot\.(cn|ai)|api\.deepseek\.com/i;
-const isOpenRouterURL = (baseURL: string) => /openrouter\.ai/i.test(baseURL);
-
-/** The provider to talk to directly for this model, or null → use the proxy.
-    Tool wishes (search/scholar/MCP) never force a CORS-capable model back
-    onto the proxy: a thinking model there dies of the CPU allowance
-    mid-thought, which is strictly worse than answering without tools.
-    OpenRouter still searches via `:online`; other direct gateways simply
-    have no tools — their toggles hide in the UI (directWithoutSearch). */
-export function directProvider(modelId?: string): RuntimeProvider | null {
-  if (!isWorkerBackend || !modelId) return null;
-  for (const p of storedProviders()) {
-    if (!DIRECT_CORS_OK.test(p.baseURL)) continue;
-    if (!p.apiKey) continue;
-    if (p.models.some((m) => m.id === modelId)) return p;
-  }
-  return null;
+export interface DirectToolOpts {
+  web?: boolean;
+  scholar?: boolean;
+  anysearchKey?: string;
+  searchEngine?: string;
+  providers?: RuntimeProvider[];
 }
 
-/** True when this model's requests bypass the proxy on a gateway that cannot
-    search (any direct lane except OpenRouter's `:online`). Search toggles
-    hide for such models — search that cannot run must not be offerable. */
-export function directWithoutSearch(modelId?: string): boolean {
-  const p = directProvider(modelId);
-  return !!p && !isOpenRouterURL(p.baseURL);
+/** The provider to talk to directly for this model, or null → use the proxy.
+    Hosted: every stored provider is direct (no CORS allowlist). Local
+    loopback keeps the Node proxy. */
+export { pickDirectProvider };
+
+export function directProvider(modelId?: string): RuntimeProvider | null {
+  return pickDirectProvider(modelId, storedProviders(), isWorkerBackend);
 }
 
 // Keep in sync with baseDirective() in server.mjs / functions/api/[[path]].js
@@ -56,14 +44,24 @@ function baseDirective(): string {
   return [
     `Current date: ${new Date().toISOString().slice(0, 10)}.`,
     'Respond in the language of the latest user message unless asked otherwise.',
-    'Bracketed markers such as [Note], [Reference: …], [Link snapshot: …], [Important]…[/Important] and [Stale: …] are provenance labels attached to your context by the canvas. Use them to judge where information came from and how much to trust it; never repeat the markers themselves in your answer.',
+    'Bracketed markers such as [Note], [Reference: …], [Link snapshot: …], [Important]…[/Important] and [Stale: …] are provenance labels attached to your context by the canvas. Use them to judge where information came from and how much to trust it; never repeat the markers themselves in the answer.',
   ].join(' ');
 }
 
 type OpenAiContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
-interface OpenAiMessage { role: 'system' | 'user' | 'assistant'; content: string | OpenAiContentPart[] }
+
+interface ToolCallWire {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+type OpenAiMessage =
+  | { role: 'system' | 'user'; content: string | OpenAiContentPart[] }
+  | { role: 'assistant'; content: string; tool_calls?: ToolCallWire[] }
+  | { role: 'tool'; tool_call_id: string; content: string };
 
 function toOpenAiMessages(messages: ContextMessage[], images?: ImageAttachment[]): OpenAiMessage[] {
   const systemParts: string[] = [baseDirective()];
@@ -83,7 +81,7 @@ function toOpenAiMessages(messages: ContextMessage[], images?: ImageAttachment[]
         ],
       });
     } else {
-      out.push({ role: m.role, content: m.content });
+      out.push({ role: m.role as 'user' | 'assistant', content: m.content });
     }
   });
   return [{ role: 'system', content: systemParts.join('\n\n') }, ...out];
@@ -92,53 +90,109 @@ function toOpenAiMessages(messages: ContextMessage[], images?: ImageAttachment[]
 function friendlyNetworkError(err: unknown): Error {
   if (err instanceof DOMException && err.name === 'AbortError') return err as unknown as Error;
   const message = err instanceof Error ? err.message : 'Unknown error';
-  return new Error(
-    /fetch|network/i.test(message)
-      ? `Network error reaching the model gateway — check your connection. (${message})`
-      : message
-  );
+  if (/Failed to fetch|NetworkError|Load failed|fetch|network/i.test(message)) {
+    return new Error(t('error.directCors'));
+  }
+  return new Error(message);
+}
+
+function gatewayHeaders(provider: RuntimeProvider): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
+  // OpenRouter documents X-Title; sending it elsewhere fails CORS preflight
+  // on gateways that only allow authorization + content-type.
+  if (isOpenRouterURL(provider.baseURL)) headers['X-Title'] = 'ThoughtDAG';
+  return headers;
 }
 
 interface UrlCitation { url?: string; title?: string }
 interface SseChoice {
-  delta?: { content?: string; reasoning?: string; reasoning_content?: string; annotations?: { type?: string; url_citation?: UrlCitation }[] };
+  delta?: {
+    content?: string | { type?: string; text?: string }[];
+    reasoning?: string;
+    reasoning_content?: string;
+    annotations?: { type?: string; url_citation?: UrlCitation }[];
+    tool_calls?: { index?: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }[];
+  };
   finish_reason?: string | null;
 }
 interface SseChunk { choices?: SseChoice[]; error?: { message?: string } | string }
 
-interface StreamPassResult { text: string; finishReason: string }
+interface ToolCallAcc { id: string; name: string; args: string }
+
+function deltaText(delta: SseChoice['delta']): string {
+  const c = delta?.content;
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) return c.map((p) => (typeof p === 'string' ? p : p?.text ?? '')).join('');
+  return '';
+}
+
+function applyToolDelta(acc: ToolCallAcc[], parts: NonNullable<SseChoice['delta']>['tool_calls']) {
+  if (!parts) return;
+  for (const part of parts) {
+    const i = part.index ?? Math.max(0, acc.length - 1);
+    while (acc.length <= i) acc.push({ id: '', name: '', args: '' });
+    const slot = acc[i];
+    if (part.id) slot.id = part.id;
+    if (part.function?.name) slot.name += part.function.name;
+    if (part.function?.arguments) slot.args += part.function.arguments;
+  }
+}
+
+function filterToolCallLeak(chunk: string, holdback: { v: string }): string {
+  let buf = holdback.v + chunk;
+  holdback.v = '';
+  buf = buf.replace(/<tool_call>[\s\S]*?<\/tool_call>\n?/g, '');
+  const open = buf.search(/<tool_call/);
+  if (open !== -1) {
+    holdback.v = buf.slice(open);
+    return buf.slice(0, open);
+  }
+  for (let k = Math.min(buf.length, 10); k > 0; k--) {
+    if ('<tool_call'.startsWith(buf.slice(-k))) {
+      holdback.v = buf.slice(-k);
+      return buf.slice(0, -k);
+    }
+  }
+  return buf;
+}
+
+interface StreamPassResult {
+  text: string;
+  finishReason: string;
+  toolCalls: ToolCallAcc[];
+  httpStatus?: number;
+}
 
 async function streamOnePass(
   provider: RuntimeProvider,
   model: string,
-  body: OpenAiMessage[],
+  messages: OpenAiMessage[],
   onText: (chunk: string) => void,
   onReasoning: (chunk: string) => void,
   citations: Map<string, Reference>,
+  extra: Record<string, unknown> | undefined,
   signal?: AbortSignal,
 ): Promise<StreamPassResult> {
   const res = await fetch(`${provider.baseURL.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${provider.apiKey}`,
-      'Content-Type': 'application/json',
-      'X-Title': 'ThoughtDAG',
-    },
+    headers: gatewayHeaders(provider),
     body: JSON.stringify({
       model,
       stream: true,
-      messages: body,
+      messages,
       stream_options: { include_usage: true },
-      // OpenRouter-only extensions; stricter endpoints reject unknown keys.
-      // usage: detailed accounting (incl. cached_tokens) — chained follow-ups
-      // share their upstream prefix, so provider prompt caches cut real cost.
       ...(isOpenRouterURL(provider.baseURL) ? { reasoning: { enabled: true }, usage: { include: true } } : {}),
+      ...extra,
     }),
     signal,
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-    throw new Error(err?.error?.message || `HTTP ${res.status}`);
+    const err = await res.json().catch(() => null) as { error?: { message?: string } | string } | null;
+    const msg = typeof err?.error === 'string' ? err.error : err?.error?.message;
+    const wrapped = new Error(msg || `HTTP ${res.status}`) as Error & { httpStatus: number };
+    wrapped.httpStatus = res.status;
+    throw wrapped;
   }
 
   const reader = res.body!.getReader();
@@ -146,6 +200,8 @@ async function streamOnePass(
   let buffer = '';
   let text = '';
   let finishReason = 'unknown';
+  const toolCalls: ToolCallAcc[] = [];
+  const holdback = { v: '' };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -167,9 +223,14 @@ async function streamOnePass(
       const choice = chunk.choices?.[0];
       if (!choice) continue;
       const delta = choice.delta;
-      if (delta?.content) { text += delta.content; onText(delta.content); }
+      const raw = deltaText(delta);
+      if (raw) {
+        const filtered = filterToolCallLeak(raw, holdback);
+        if (filtered) { text += filtered; onText(filtered); }
+      }
       const reasoning = delta?.reasoning ?? delta?.reasoning_content;
       if (reasoning) onReasoning(reasoning);
+      applyToolDelta(toolCalls, delta?.tool_calls);
       for (const a of delta?.annotations ?? []) {
         const c = a.url_citation;
         if (c?.url && !citations.has(c.url)) {
@@ -179,14 +240,28 @@ async function streamOnePass(
       if (choice.finish_reason) finishReason = choice.finish_reason;
     }
   }
-  return { text, finishReason };
+  if (holdback.v && !holdback.v.startsWith('<tool_call')) {
+    text += holdback.v;
+    onText(holdback.v);
+  }
+  return { text, finishReason, toolCalls: toolCalls.filter((c) => c.name) };
+}
+
+function toolQuery(args: string): string {
+  try {
+    const parsed = JSON.parse(args || '{}') as { query?: unknown };
+    if (typeof parsed.query === 'string' && parsed.query.trim()) return parsed.query.trim();
+  } catch { /* raw string fallback */ }
+  return args.trim();
+}
+
+function isSearchTool(name: string): name is SearchToolName {
+  return (SEARCH_TOOL_NAMES as string[]).includes(name);
 }
 
 /**
- * Streaming call straight to the gateway, mirroring the proxy's behavior:
- * `:online` when web search is on, one plain-model retry if the online
- * variant closes with zero text, and a finish-reason diagnostic if the
- * model still produced nothing.
+ * Streaming call straight to the gateway. OpenRouter web search uses the
+ * `:online` suffix; other search tools hop through the Worker sidecar.
  */
 export async function directLlmStream(
   provider: RuntimeProvider,
@@ -196,34 +271,132 @@ export async function directLlmStream(
   signal?: AbortSignal,
   images?: ImageAttachment[],
   callbacks?: StreamCallbacks,
-  webSearch?: boolean,
+  toolPrefs?: DirectToolOpts | boolean,
 ): Promise<string> {
-  const body = toOpenAiMessages(contextMessages, images);
-  // `:online` is an OpenRouter model-id suffix; other gateways 404 on it.
-  const useOnline = isOpenRouterURL(provider.baseURL) && webSearch !== false;
+  // Older callers passed `webSearch?: boolean` as the last arg.
+  const opts: DirectToolOpts = typeof toolPrefs === 'boolean' ? { web: toolPrefs } : (toolPrefs ?? {});
+  const messages = toOpenAiMessages(contextMessages, images);
+  const useOnline = isOpenRouterURL(provider.baseURL) && opts.web !== false;
+  const providers = opts.providers ?? storedProviders();
+  const canWebSidecar = !useOnline && opts.web !== false
+    && (!!opts.anysearchKey || providerHasGlmSearch(providers));
+  const canScholar = opts.scholar !== false;
+
+  const tools: typeof SEARCH_TOOL_DEFS[SearchToolName][] = [];
+  if (canWebSidecar) tools.push(SEARCH_TOOL_DEFS.web_search);
+  if (canScholar) {
+    tools.push(SEARCH_TOOL_DEFS.arxiv_search);
+    tools.push(SEARCH_TOOL_DEFS.semantic_scholar);
+  }
+  if (tools.length > 0) {
+    const sys = messages[0];
+    if (sys?.role === 'system' && typeof sys.content === 'string') {
+      sys.content = `${sys.content}\n\n${TOOL_LOOP_DIRECTIVE}`;
+    }
+  }
+
   const citations = new Map<string, Reference>();
+  const sources: SearchHit[] = [];
   let full = '';
   let reasoningFull = '';
+  let charsAtLastSearch = 0;
   const onText = (chunk: string) => { full += chunk; onChunk(chunk, full); };
   const onReasoning = (chunk: string) => {
     reasoningFull += chunk;
     callbacks?.onReasoning?.(chunk, reasoningFull);
   };
 
-  try {
-    let pass = await streamOnePass(
-      provider, useOnline ? `${modelId}:online` : modelId, body, onText, onReasoning, citations, signal);
+  const extraFor = (step: number, allowTools: boolean): Record<string, unknown> | undefined => {
+    if (!allowTools || tools.length === 0 || step >= 3) return undefined;
+    return { tools, tool_choice: 'auto' };
+  };
 
-    // :online sometimes closes with zero text (thinking models most of all):
-    // retry once with the plain model so the user always gets an answer.
+  try {
+    let pass: StreamPassResult | undefined;
+    for (let step = 0; step < 5; step++) {
+      const model = useOnline && step === 0 ? `${modelId}:online` : modelId;
+      try {
+        pass = await streamOnePass(
+          provider, model, messages, onText, onReasoning, citations, extraFor(step, true), signal);
+      } catch (err) {
+        const http = (err as Error & { httpStatus?: number }).httpStatus;
+        const msg = err instanceof Error ? err.message : '';
+        if (step === 0 && tools.length > 0 && http === 400 && /tool/i.test(msg)) {
+          pass = await streamOnePass(
+            provider, model, messages, onText, onReasoning, citations, undefined, signal);
+        } else {
+          throw err;
+        }
+      }
+
+      const calls = pass.toolCalls.filter((c) => c.name);
+      if (calls.length === 0) break;
+      if (step >= 3) break;
+
+      const wires: ToolCallWire[] = calls.map((c, i) => ({
+        id: c.id || `call_${step}_${i}`,
+        type: 'function',
+        function: { name: c.name, arguments: c.args || '{}' },
+      }));
+      messages.push({ role: 'assistant', content: pass.text || '', tool_calls: wires });
+
+      for (const call of wires) {
+        const name = call.function.name;
+        const query = toolQuery(call.function.arguments);
+        charsAtLastSearch = full.length;
+        callbacks?.onToolCall?.(name, query);
+        if (!isSearchTool(name)) {
+          messages.push({ role: 'tool', tool_call_id: call.id, content: `Unknown tool ${name}.` });
+          continue;
+        }
+        try {
+          const result = await sidecarSearch(name, query, {
+            anysearchKey: opts.anysearchKey,
+            searchEngine: opts.searchEngine,
+            providers,
+            signal,
+          });
+          for (const s of result.sources) {
+            if (s.url && !citations.has(s.url)) citations.set(s.url, s);
+            sources.push(s);
+          }
+          messages.push({ role: 'tool', tool_call_id: call.id, content: result.text });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          messages.push({ role: 'tool', tool_call_id: call.id, content: `Search failed (${msg}) — answer from your knowledge.` });
+        }
+      }
+    }
+
+    // :online sometimes closes with zero text — retry once with the plain model.
     if (useOnline && full.length === 0) {
-      pass = await streamOnePass(provider, modelId, body, onText, onReasoning, citations, signal);
+      pass = await streamOnePass(
+        provider, modelId, toOpenAiMessages(contextMessages, images), onText, onReasoning, citations, undefined, signal);
+    }
+
+    // Searched but wrote almost nothing after the last search: one tool-free synthesis.
+    if (sources.length > 0 && full.length - charsAtLastSearch < 200) {
+      const numbered = sources
+        .map((r, i) => `[${i + 1}] ${r.title}${r.authors ? ` — ${r.authors}` : ''}${r.date ? ` (${r.date})` : ''}\n${r.url ?? ''}\n${r.content ?? ''}`)
+        .join('\n\n');
+      const lastUser = [...contextMessages].reverse().find((m) => m.role === 'user');
+      messages.push({
+        role: 'user',
+        content:
+          `Search results:\n\n${numbered}\n\n` +
+          `Based on these results and your own knowledge, write the final synthesized answer to my previous question` +
+          `${lastUser ? ` ("${String(lastUser.content).slice(0, 200)}")` : ''}. ` +
+          'Analyze rather than list; cite sources inline as [n] using the numbers above; if the results are not relevant, say so and answer from your own knowledge.',
+      });
+      pass = await streamOnePass(
+        provider, modelId, messages, onText, onReasoning, citations, undefined, signal);
     }
 
     if (full.length === 0) {
-      throw new Error(`Model produced no text (finish: ${pass.finishReason}, model: ${modelId}${useOnline ? ' via :online' : ''})`);
+      throw new Error(`Model produced no text (finish: ${pass?.finishReason ?? 'unknown'}, model: ${modelId}${useOnline ? ' via :online' : ''})`);
     }
-    if (citations.size > 0) callbacks?.onSources?.([...citations.values()]);
+    const merged: Reference[] = sources.length > 0 ? sources : [...citations.values()];
+    if (merged.length > 0) callbacks?.onSources?.(merged);
     return full;
   } catch (err: unknown) {
     throw friendlyNetworkError(err);
@@ -240,11 +413,7 @@ export async function directLlmCall(
   try {
     const res = await fetch(`${provider.baseURL.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${provider.apiKey}`,
-        'Content-Type': 'application/json',
-        'X-Title': 'ThoughtDAG',
-      },
+      headers: gatewayHeaders(provider),
       body: JSON.stringify({ model: modelId, messages: toOpenAiMessages(contextMessages, images) }),
     });
     if (!res.ok) {

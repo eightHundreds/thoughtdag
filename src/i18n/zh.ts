@@ -315,6 +315,8 @@ export const zh: Record<keyof typeof en, string> = {
   'content.reExtractAgain': '重新提取',
   'content.noVisionModel': '没有可用的视觉模型，无法自动理解图片。连接一个带视觉能力的模型即可（工具栏模型菜单 → 配置模型 API；GLM-4V Flash 有免费档）。',
   'error.textOnlyModelImages': '当前模型不支持识图。请换一个带视觉标记的模型，或连接一个视觉模型（GLM-4V Flash 有免费档）后在阅读器里用「识别」把图片转成文字。',
+  'error.directCors': '浏览器连不上这个模型接口。常见原因是网关没允许本页跨域（CORS），或当前网络到不了该地址。在网关里放行本页 origin（含 authorization、content-type），或换一个已允许浏览器访问的供应商。',
+  'error.noDirectProvider': '没有可直连的模型。请先在设置里连接供应商并选一个模型。',
   'content.extractFailed': '图片提取失败（已尝试全部视觉模型）',
   'content.extractFellBack': '已降级用',
   'content.extractPrompt': '先判断这张图属于哪一类：照片 / 界面截图 / 示意图或流程图 / 科研图表 / 含文字的文档。然后按该类型做最精细的提取：\n- 科研图表：图表类型、各坐标轴与单位、图例、面板结构（如 a/b/c 各是什么）、主要趋势与效应方向、显著的异常点；不要臆造读不清的具体数值\n- 示意图/流程图：列出全部组件及其连接/因果关系\n- 文档/截图：逐字转录全部可见文字，保持原有结构（标题、列表、表格）\n- 照片：物体与场景描述，并转录任何可见文字\n直接输出提取内容本身，不要开场白和总结。',

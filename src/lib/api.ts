@@ -1,4 +1,4 @@
-import { API_BASE } from './constants';
+import { API_BASE, isHostedProxy } from './constants';
 import { toast, useUiStore } from './ui-store';
 import { getModelsOnce } from './use-models';
 import { t, fmt } from '../i18n';
@@ -126,6 +126,7 @@ export async function llmCall(contextMessages: ContextMessage[], images?: ImageA
     await guardDirectVision(modelId, images);
     return directLlmCall(direct, modelId, contextMessages, images);
   }
+  if (isHostedProxy()) throw new Error(t('error.noDirectProvider'));
   try {
     const res = await fetch(API_URL, {
       method: 'POST',
@@ -182,16 +183,24 @@ export async function llmCallStream(
   toolPrefs?: ToolPrefs,
   modelOverride?: string,
 ): Promise<string> {
-  // On the Workers deployment, OpenRouter models stream straight from the
-  // browser — the proxy's CPU allowance can't survive big contexts + heavy
-  // thinking models, and the key staying local is a feature in itself.
+  // Hosted: every stored provider streams from the browser. The Worker is
+  // only a sidecar (search / fetch-url / probe fallback). Local dev keeps
+  // the Node proxy so MCP and the in-process tool loop stay one hop.
   const modelId = modelOverride || useUiStore.getState().selectedModel || undefined;
   images = await imagesForModel(modelId, images);
   const direct = directProvider(modelId);
   if (direct && modelId) {
     await guardDirectVision(modelId, images);
-    return directLlmStream(direct, modelId, contextMessages, onChunk, signal, images, callbacks, toolPrefs?.web);
+    const ui = useUiStore.getState();
+    return directLlmStream(direct, modelId, contextMessages, onChunk, signal, images, callbacks, {
+      web: toolPrefs?.web,
+      scholar: toolPrefs?.scholar,
+      anysearchKey: ui.anysearchKey || undefined,
+      searchEngine: ui.searchEnginePref,
+      providers: storedProviders(),
+    });
   }
+  if (isHostedProxy()) throw new Error(t('error.noDirectProvider'));
   try {
     const res = await fetch(STREAM_URL, {
       method: 'POST',

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { API_BASE } from './constants';
+import { API_BASE, isHostedProxy } from './constants';
 import { storedProviders, pushProviders } from './runtime-providers';
+import { catalogFromProviders } from './provider-catalog';
 
 export interface ModelInfo {
   id: string;
@@ -36,6 +37,10 @@ export function getModelsOnce(): Promise<ModelData | null> {
       try {
         return (cache = await pushProviders(stored));
       } catch { /* proxy down or bad config: fall through to the plain list */ }
+    }
+    if (isHostedProxy()) {
+      const anysearchKey = localStorage.getItem('thoughtdag.anysearchKey') || undefined;
+      return (cache = catalogFromProviders([], anysearchKey));
     }
     return fetch(`${API_BASE}/api/models`)
       .then((r) => r.json())

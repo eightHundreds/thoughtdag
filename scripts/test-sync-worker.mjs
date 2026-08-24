@@ -245,3 +245,46 @@ test('OPTIONS /api/probe-models allows POST from Pages', async () => {
   assert.equal(res.status, 204);
   assert.ok(headerList(res, 'Access-Control-Allow-Methods').includes('post'));
 });
+
+test('POST /api/search requires a query', async () => {
+  const res = await handle(req('/api/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool: 'arxiv_search' }),
+  }));
+  assert.equal(res.status, 400);
+  assert.equal(res.headers.get('Access-Control-Allow-Origin'), ORIGIN);
+  assert.deepEqual(await res.json(), { error: 'query required' });
+});
+
+test('POST /api/search rejects unknown tools', async () => {
+  const res = await handle(req('/api/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool: 'shell', query: 'pwd' }),
+  }));
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'unknown tool' });
+});
+
+test('POST /api/search web_search needs an engine', async () => {
+  const res = await handle(req('/api/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool: 'web_search', query: 'test' }),
+  }));
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'no web search engine configured' });
+});
+
+test('OPTIONS /api/search allows POST from Pages', async () => {
+  const res = await handle(req('/api/search', {
+    method: 'OPTIONS',
+    headers: {
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type',
+    },
+  }));
+  assert.equal(res.status, 204);
+  assert.ok(headerList(res, 'Access-Control-Allow-Methods').includes('post'));
+});
