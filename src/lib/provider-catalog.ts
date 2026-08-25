@@ -31,6 +31,16 @@ const GLM_SEARCH_HOSTS = ['open.bigmodel.cn', 'api.z.ai'];
 
 export const isOpenRouterURL = (baseURL: string) => /openrouter\.ai/i.test(baseURL);
 
+/** Local runtimes (Ollama, ChatGPT plan bridge) typically have no CORS. */
+export function isLoopbackURL(baseURL: string): boolean {
+  try {
+    const h = new URL(baseURL).hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
 export function providerHasGlmSearch(providers: { baseURL?: string; apiKey?: string }[]): boolean {
   return providers.some((p) =>
     !!p.apiKey && GLM_SEARCH_HOSTS.some((h) => String(p.baseURL ?? '').includes(h)));
@@ -66,14 +76,14 @@ export function parseProbePayload(data: unknown): ProbeModel[] {
   }).filter((m) => m.id);
 }
 
-/** Hosted deployments talk to the gateway from the browser. Local Node
-    keeps the in-process proxy. */
+/** Browser-stored providers talk to the gateway from the page — hosted
+    and local. Models that exist only in a local .env have no entry here
+    and still ride the Node proxy. */
 export function pickDirectProvider<T extends { models: { id: string }[] }>(
   modelId: string | undefined,
   providers: T[],
-  hosted: boolean,
 ): T | null {
-  if (!hosted || !modelId) return null;
+  if (!modelId) return null;
   return providers.find((p) => p.models.some((m) => m.id === modelId)) ?? null;
 }
 

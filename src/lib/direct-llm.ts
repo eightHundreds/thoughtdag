@@ -2,7 +2,7 @@ import type { ContextMessage, ImageAttachment, StreamCallbacks } from './api';
 import type { Reference } from '../types';
 import { isHostedProxy } from './constants';
 import { storedProviders, type RuntimeProvider } from './runtime-providers';
-import { isOpenRouterURL, pickDirectProvider, providerHasGlmSearch } from './provider-catalog';
+import { isLoopbackURL, isOpenRouterURL, pickDirectProvider, providerHasGlmSearch } from './provider-catalog';
 import {
   SEARCH_TOOL_DEFS,
   SEARCH_TOOL_NAMES,
@@ -13,14 +13,11 @@ import {
 } from './sidecar-search';
 import { t } from '../i18n';
 
-// Direct browser→gateway streaming. On the hosted deployment the Worker
-// CPU allowance kills long thinking streams, so generation talks to the
-// gateway from the browser. The Worker stays as a sidecar for the few
-// calls browsers cannot make (search APIs, arbitrary URL snapshots,
-// /models CORS fallback). Local dev keeps the Node proxy: no CPU cap,
-// plus MCP / vision reroute / the richer tool loop in one hop.
-
-const isWorkerBackend = isHostedProxy();
+// Direct browser→gateway streaming. Generation talks to the gateway from
+// the page (hosted and local). The sidecar (Worker / Node) stays for the
+// few calls browsers cannot make: search APIs, URL snapshots, PDF extract,
+// /models CORS fallback. Models that exist only in a local .env still
+// ride the Node proxy.
 
 export interface DirectToolOpts {
   web?: boolean;
@@ -30,13 +27,16 @@ export interface DirectToolOpts {
   providers?: RuntimeProvider[];
 }
 
-/** The provider to talk to directly for this model, or null → use the proxy.
-    Hosted: every stored provider is direct (no CORS allowlist). Local
-    loopback keeps the Node proxy. */
+/** The provider to talk to directly for this model, or null → use the proxy
+    (.env-only models, or a local loopback runtime with no CORS). */
 export { pickDirectProvider };
 
 export function directProvider(modelId?: string): RuntimeProvider | null {
-  return pickDirectProvider(modelId, storedProviders(), isWorkerBackend);
+  const p = pickDirectProvider(modelId, storedProviders());
+  if (!p) return null;
+  // Ollama / ChatGPT-plan bridge have no CORS; local Node can still reach them.
+  if (!isHostedProxy() && isLoopbackURL(p.baseURL)) return null;
+  return p;
 }
 
 // Keep in sync with baseDirective() in server.mjs / functions/api/[[path]].js

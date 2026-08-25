@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   catalogFromProviders,
+  isLoopbackURL,
   parseProbePayload,
   pickDirectProvider,
 } from '../src/lib/provider-catalog.ts';
@@ -49,13 +50,19 @@ test('probe payload strips Google models/ prefixes', () => {
   assert.equal(models[0].contextLength, 128000);
 });
 
-test('hosted generation is direct for every stored provider', () => {
+test('stored providers generate from the browser, hosted or local', () => {
   const providers = [
     { name: 'new', models: [{ id: 'gpt-5.6-luna' }] },
     { name: 'or', models: [{ id: 'openrouter/auto' }] },
   ];
-  assert.equal(pickDirectProvider('gpt-5.6-luna', providers, true)?.name, 'new');
-  assert.equal(pickDirectProvider('openrouter/auto', providers, true)?.name, 'or');
-  assert.equal(pickDirectProvider('gpt-5.6-luna', providers, false), null);
-  assert.equal(pickDirectProvider('missing', providers, true), null);
+  assert.equal(pickDirectProvider('gpt-5.6-luna', providers)?.name, 'new');
+  assert.equal(pickDirectProvider('openrouter/auto', providers)?.name, 'or');
+  assert.equal(pickDirectProvider('missing', providers), null);
+  assert.equal(pickDirectProvider(undefined, providers), null);
+});
+
+test('loopback gateways are the CORS exception', () => {
+  assert.equal(isLoopbackURL('http://127.0.0.1:10531/v1'), true);
+  assert.equal(isLoopbackURL('http://localhost:11434/v1'), true);
+  assert.equal(isLoopbackURL('https://new-api.tideflow.top/v1'), false);
 });

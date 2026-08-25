@@ -113,22 +113,25 @@ export function saveProviders(providers: RuntimeProvider[]): void {
   localStorage.setItem(LS_KEY, JSON.stringify(providers));
 }
 
-/** Build the picker catalog. Hosted: computed locally (generation is
-    browser-direct). Local Node proxy: still asked, so .env models merge. */
+/** Build the picker catalog from browser-stored providers. Local Node,
+    when reachable, is asked so .env models can merge in; if it is down
+    the browser catalog is enough to generate. */
 export async function pushProviders(providers: RuntimeProvider[]): Promise<ModelData> {
   const anysearchKey = localStorage.getItem('thoughtdag.anysearchKey') || undefined;
-  if (isHostedProxy()) return catalogFromProviders(providers, anysearchKey);
-  const res = await fetch(`${API_BASE}/api/runtime-providers`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ providers, ...(anysearchKey ? { anysearchKey } : {}) }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(errorText(err, `HTTP ${res.status}`));
+  const local = catalogFromProviders(providers, anysearchKey);
+  if (isHostedProxy()) return local;
+  try {
+    const res = await fetch(`${API_BASE}/api/runtime-providers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ providers, ...(anysearchKey ? { anysearchKey } : {}) }),
+    });
+    if (!res.ok) return local;
+    const d = await res.json();
+    return { models: d.models ?? [], default: d.default ?? null, capabilities: d.capabilities };
+  } catch {
+    return local;
   }
-  const d = await res.json();
-  return { models: d.models ?? [], default: d.default ?? null, capabilities: d.capabilities };
 }
 
 function isProbeUpstreamError(message: string): boolean {

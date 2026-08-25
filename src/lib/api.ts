@@ -183,9 +183,9 @@ export async function llmCallStream(
   toolPrefs?: ToolPrefs,
   modelOverride?: string,
 ): Promise<string> {
-  // Hosted: every stored provider streams from the browser. The Worker is
-  // only a sidecar (search / fetch-url / probe fallback). Local dev keeps
-  // the Node proxy so MCP and the in-process tool loop stay one hop.
+  // Stored providers stream from the browser (hosted and local). The
+  // sidecar is search / fetch-url / probe fallback. .env-only models on
+  // local Node still ride /api/stream.
   const modelId = modelOverride || useUiStore.getState().selectedModel || undefined;
   images = await imagesForModel(modelId, images);
   const direct = directProvider(modelId);
