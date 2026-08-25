@@ -48,7 +48,7 @@ import { countTokens } from './utils';
 import { buildExampleGraph } from './lib/example-graph';
 import { COLORS, FRAME_COLORS, PANEL_INSET } from './lib/constants';
 import { lockWorkWrapper, unlockWorkWrapper } from './lib/layout';
-import { liftWheelBlocks, wheelConsumedByScroll } from './lib/wheel-over-card';
+
 import { panelShift } from './lib/panel-shift';
 import { migrateActiveCanvasToVault, gcVaultAtBoot } from './lib/attachment-vault-boot';
 import { consumeOpenRouterCallback, startOpenRouterOAuth } from './lib/openrouter-oauth';
@@ -1798,22 +1798,6 @@ function ZoomTierTag() {
   const tier = useZoomTier();
   const zoom = useRfStore((s) => s.transform[2]);
   const prevTier = useRef<typeof tier | null>(null);
-  useEffect(() => {
-    const root = document.querySelector('.react-flow') as HTMLElement | null;
-    if (!root) return;
-    // nowheel/nopan are for scrolling TEXT. They also swallow Mac two-finger
-    // pan (a wheel event) and pinch-zoom over an idle follow-up / short
-    // answer. Lift both in capture unless the box can actually scroll this
-    // gesture — then React Flow's filter sees a free pane.
-    const onWheel = (e: Event) => {
-      const we = e as WheelEvent;
-      const target = we.target;
-      if (!(we.ctrlKey || we.metaKey) && wheelConsumedByScroll(target, we)) return;
-      liftWheelBlocks(target, root);
-    };
-    root.addEventListener('wheel', onWheel, { capture: true, passive: true });
-    return () => root.removeEventListener('wheel', onWheel, { capture: true });
-  }, []);
   useEffect(() => {
     document.querySelector('.react-flow')?.setAttribute('data-zoom-tier', tier);
     const prev = prevTier.current;

@@ -1,7 +1,7 @@
 // Idle card regions must not swallow canvas pan. Run via `npm test`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { overflowConsumesWheel } from '../src/lib/wheel-over-card.ts';
+import { leftoverHorizontalSwipe, overflowConsumesWheel, shouldCancelBrowserSwipe } from '../src/lib/wheel-over-card.ts';
 
 const idle = {
   overflowY: 'auto',
@@ -52,4 +52,35 @@ test('overflowing answer still consumes upward scroll away from the top', () => 
     scrollTop: 200,
     deltaY: -40,
   }), true);
+});
+
+function wheel(over = {}) {
+  return { ctrlKey: false, metaKey: false, deltaX: 0, deltaY: 0, ...over };
+}
+
+test('horizontal trackpad swipe with no scroll target is cancelled (browser back)', () => {
+  assert.equal(shouldCancelBrowserSwipe(null, wheel({ deltaX: -40 })), true);
+});
+
+test('vertical two-finger pan with no overflow is cancelled so the canvas keeps it', () => {
+  assert.equal(shouldCancelBrowserSwipe(null, wheel({ deltaY: 40 })), true);
+});
+
+test('pinch is always cancelled so the browser does not page-zoom', () => {
+  assert.equal(shouldCancelBrowserSwipe(null, wheel({ deltaY: -40, ctrlKey: true })), true);
+});
+
+test('any leftover deltaX on a Y-only scroller is a browser-back swipe', () => {
+  const yBox = {
+    ...idle,
+    overflowY: 'auto',
+    overflowX: 'visible',
+    scrollHeight: 800,
+    clientHeight: 400,
+    scrollTop: 0,
+    deltaX: -12,
+    deltaY: 40,
+  };
+  assert.equal(overflowConsumesWheel(yBox), true);
+  assert.equal(leftoverHorizontalSwipe(yBox), true);
 });

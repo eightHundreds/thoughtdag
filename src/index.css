@@ -47,6 +47,16 @@ html, body, #root {
   font-family: var(--font-sans);
   line-height: 1.6;
   overflow: hidden;
+  /* Chrome/Edge: leftover trackpad X is history swipe unless contained.
+     (Safari ignores this; the capture wheel listener cancel that path.) */
+  overscroll-behavior: none;
+}
+
+.react-flow,
+.react-flow__renderer,
+.react-flow__viewport,
+.react-flow__pane {
+  overscroll-behavior: none;
 }
 
 code, pre {

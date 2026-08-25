@@ -5,6 +5,11 @@ import '@fontsource-variable/jetbrains-mono/index.css'
 import App from './App'
 import { bootProjects } from './store/projects'
 import { isViewerMode, bootViewer } from './lib/viewer'
+import { installWheelGuard } from './lib/wheel-over-card'
+
+// Before React: leftover trackpad X is Chrome/Safari history swipe.
+// Must not wait on a child effect — the canvas is a full-page app.
+installWheelGuard()
 
 // Resolve the active project and rehydrate the store before/while React
 // mounts — App's hydration gate opens when this finishes. A #view= link
