@@ -301,14 +301,20 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
     setSelectedNodeId(childId);
     rf.setCenter(child.position.x + 260, child.position.y + 110, { zoom: rf.getZoom(), duration: 300 });
   };
-  // Map layer: the display summary for the ACTIVE version. Long answers wear
-  // it instead of raw text; the full answer lives one double-click away.
+  // Display summary of the ACTIVE version (map layer only, never context).
+  // Work-tier cards keep the full answer and wear this as a takeaway line;
+  // map-tier plaques show title + takeaway instead of the body.
   const versionSummary = activeSummary(data);
+  const mapTopic = activeTopic(data);
   const mapHeadline = versionSummary
     || (data.question ? data.question.replace(/\s+/g, ' ').slice(0, 160) : '');
   const mapSubline = versionSummary
     ? data.question.replace(/\s+/g, ' ').slice(0, 120)
     : '';
+  // Plaque title prefers the micro topic; the takeaway (the card's 摘要)
+  // sits on the line below when the judge wrote both and they differ.
+  const mapTitle = mapTopic || versionSummary || mapHeadline;
+  const mapTakeaway = versionSummary && versionSummary !== mapTitle ? versionSummary : '';
   const takeawayType = data.summaryTypes?.[data.responseIndex] ?? undefined;
   // Reasoning of the ACTIVE version (models that emit it); display only
   const versionReasoning = data.reasonings?.[data.responseIndex] ?? undefined;
@@ -334,7 +340,7 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
   // Stale at glyph tier: the seal itself wears the amber ring — there is no
   // card corner left to pin the dot to
   const staleRing = isStale && glyphTier ? ' ring-4 ring-amber-400' : '';
-  const showSummaryCard = !!versionSummary && data.response.length > 400 && !data.isLoading && !data.isEditingResponse;
+  const showTakeaway = !!versionSummary && !data.isLoading && !data.isEditingResponse;
 
   return (
     <div
@@ -465,18 +471,22 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
               )}
             </>
           ) : (
-            // Thinning by signal: badged turns keep the takeaway in full
-            // ink. Unbadged waypoints shrink to their micro topic. Never
-            // dump the raw answer — the box is occupancy, not a document.
+            // Question as eyebrow, topic as the short title, takeaway as
+            // the 摘要 line. Never dump the raw answer — the box is occupancy.
             <>
               {mapSubline && (
                 <div className="map-lod-sub text-ink-muted shrink-0">
                   {mapSubline}
                 </div>
               )}
-              <div className={`map-lod-title font-semibold ${mapSubline ? 'mt-2 ' : ''}min-h-0 overflow-hidden ${badge ? 'text-ink' : 'text-ink-muted'}`}>
-                {(badge ? versionSummary : (activeTopic(data) ?? versionSummary)) || mapHeadline}
+              <div className={`map-lod-title font-semibold ${mapSubline ? 'mt-2 ' : ''}min-h-0 overflow-hidden ${badge || mapTakeaway ? 'text-ink' : 'text-ink-muted'}`}>
+                {mapTitle}
               </div>
+              {mapTakeaway && (
+                <div className="map-lod-sub text-ink mt-2 min-h-0 overflow-hidden">
+                  {mapTakeaway}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -692,11 +702,9 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
               </div>
             </div>
           ) : (
-            showSummaryCard ? (
-              // the map shows the landmark, not the terrain photo: an auto
-              // summary of THIS version (display only — the model reads the
-              // full text; double-click opens the panel for humans)
-              <div className="px-3 py-2.5 bg-surface rounded-xl nopan" title={t('node.summaryTitle')}>
+            <>
+            {showTakeaway && (
+              <div className="px-3 py-2.5 bg-surface rounded-xl nopan mb-2" title={t('node.summaryTitle')}>
                 <span className="text-2xs bg-wash text-ink-faint px-1.5 py-0.5 rounded-full">{t('node.summaryLabel')}</span>
                 {badge && (
                   <span title={t(badge.key as Parameters<typeof t>[0])} className={`text-2xs px-1.5 py-0.5 rounded-full ml-1.5 font-medium ${badge.cls}`}>
@@ -705,11 +713,11 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
                 )}
                 <div className="text-sm text-ink-muted leading-relaxed mt-1.5">{versionSummary}</div>
               </div>
-            ) : (
-            <>
+            )}
             {versionReasoning && (
               <ReasoningDisclosure text={versionReasoning} />
             )}
+            {data.response ? (
             <div
               ref={responseRef}
               onClick={handleResponseClick}
@@ -721,8 +729,8 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
                 <Markdown>{data.response}</Markdown>
               )}
             </div>
+            ) : null}
             </>
-            )
           )}
 
           {/* Fan-out placeholder: the human decides when to expand */}
