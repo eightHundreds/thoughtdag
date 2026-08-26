@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Dna, FolderOpen, Loader2, Pencil, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
-import { useProjects, switchProject, createProject, renameProject, deleteProject } from '../store/projects';
-import { useI18n } from '../i18n';
+import { ChevronDown, Dna, FolderOpen, Loader2, Pencil, Plus, RefreshCw, Sparkles, Trash2, Upload } from 'lucide-react';
+import { useProjects, switchProject, createProject, renameProject, deleteProject, loadProjectNodes } from '../store/projects';
 import { parseImportFile } from '../lib/export';
 import ImportChatModal from './ImportChatModal';
 import type { ImportableConversation } from '../lib/import-chat';
 import { confirmDialog, toast } from '../lib/ui-store';
 import { isImeComposing } from '../utils';
-import { useT, t as ti, fmt } from '../i18n';
+import { useT, t as ti, fmt, useI18n } from '../i18n';
+import { generateCanvasTitle } from '../lib/canvas-title';
 
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -31,6 +31,7 @@ export default function ProjectSwitcher({ onSwitched }: { onSwitched: () => void
   const [chatImport, setChatImport] = useState<ImportableConversation[] | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [namingId, setNamingId] = useState<string | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -51,6 +52,23 @@ export default function ProjectSwitcher({ onSwitched }: { onSwitched: () => void
     setOpen(false);
     await switchProject(id);
     onSwitched();
+  };
+
+  const doAutoName = async (id: string) => {
+    if (namingId) return;
+    setNamingId(id);
+    try {
+      const nodes = await loadProjectNodes(id);
+      const title = await generateCanvasTitle(nodes, useI18n.getState().lang);
+      await renameProject(id, title);
+    } catch (err) {
+      const empty = err instanceof Error && err.name === 'CanvasTitleEmpty';
+      toast('error', empty ? t('switcher.autoNameEmpty') : fmt(t('switcher.autoNameFailed'), {
+        msg: err instanceof Error ? err.message : String(err),
+      }));
+    } finally {
+      setNamingId(null);
+    }
   };
 
   return (
@@ -104,6 +122,17 @@ export default function ProjectSwitcher({ onSwitched }: { onSwitched: () => void
                       </div>
                       <div className="text-2xs text-ink-faint">{relativeTime(p.updatedAt)}</div>
                     </div>
+                    <button
+                      title={t('switcher.autoName')}
+                      disabled={namingId === p.id}
+                      data-auto-name
+                      className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-accent p-1 rounded transition-all shrink-0 disabled:opacity-100"
+                      onClick={(e) => { e.stopPropagation(); void doAutoName(p.id); }}
+                    >
+                      {namingId === p.id
+                        ? <Loader2 size={14} strokeWidth={1.75} className="animate-spin text-accent" />
+                        : <Sparkles size={14} strokeWidth={1.75} />}
+                    </button>
                     <button
                       title={t('switcher.rename')}
                       className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-ink p-1 rounded transition-all shrink-0"

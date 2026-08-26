@@ -6,6 +6,7 @@ import { flushPendingWrites } from '../lib/persistence';
 import { buildRuleOutRuleIn } from '../lib/paradigms/rule-out-rule-in';
 import { toast } from '../lib/ui-store';
 import { t } from '../i18n';
+import type { ThoughtNode } from '../types';
 
 // Project layer: each canvas persists under its own IndexedDB key; this
 // module owns the metadata list and the switching choreography.
@@ -136,6 +137,25 @@ export async function renameProject(id: string, name: string): Promise<void> {
     projects: s.projects.map((p) => (p.id === id ? { ...p, name } : p)),
   }));
   await saveMeta();
+}
+
+/** Graph of a canvas without switching to it. Active project reads live
+    state (after flushing the debounce); others read their IDB key. */
+export async function loadProjectNodes(id: string): Promise<ThoughtNode[]> {
+  const { activeId } = useProjects.getState();
+  if (id === activeId) {
+    await flushPendingWrites();
+    return useStore.getState().nodes;
+  }
+  const raw = await idbGet(projectStorageKey(id));
+  if (raw == null) return [];
+  try {
+    const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const nodes = envelope?.state?.nodes;
+    return Array.isArray(nodes) ? (nodes as ThoughtNode[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function deleteProject(id: string, opts?: { propagate?: boolean }): Promise<void> {
