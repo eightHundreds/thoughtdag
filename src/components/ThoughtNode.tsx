@@ -1,12 +1,12 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Handle, Position, useReactFlow, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { AlertTriangle, Archive, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Copy, Eye, GitBranch, Globe, Hourglass, Minimize2, Paperclip, RefreshCw, Send, Split, Square, Star, Trash2, UserRound, X, Pencil } from 'lucide-react';
+import { AlertTriangle, Archive, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Eye, GitBranch, Globe, Hourglass, Minimize2, Paperclip, RefreshCw, Send, Split, Square, Star, Trash2, UserRound, X, Pencil } from 'lucide-react';
 import 'katex/dist/katex.min.css';
 import type { ThoughtNode as ThoughtNodeType } from '../types';
 import { useStore } from '../store';
 import { useZoomTier } from '../lib/use-map-mode';
 import { occupancyHeight } from '../lib/layout';
-import { generateId, isImeComposing , activeSummary, activeTopic, awaitingInput } from '../utils';
+import { generateId, isImeComposing , activeSummary, activeTopic, awaitingInput, formatStamp } from '../utils';
 import { processFile } from '../lib/attachments';
 import { copyText } from '../lib/export';
 import { isRunLocked } from '../lib/paradigm';
@@ -248,8 +248,17 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
   };
 
   const handleEditKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey && !isImeComposing(e)) { e.preventDefault(); handleEditSubmit(); }
-    if (e.key === 'Escape') setEditing(id, false);
+    if (e.key === 'Escape') { setEditing(id, false); return; }
+    if (e.key !== 'Enter' || isImeComposing(e)) return;
+    // First-input surfaces (human turn, empty ask node) keep Enter-to-send.
+    // REVISING an existing question confirms explicitly — a regeneration is
+    // never one accidental keystroke away: Enter breaks the line; submit is
+    // the ✓ button, ⌘/Ctrl+Enter or Shift+Enter.
+    if (isHuman || isAwaitingAsk) {
+      if (!e.shiftKey) { e.preventDefault(); handleEditSubmit(); }
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.shiftKey) { e.preventDefault(); handleEditSubmit(); }
   };
 
   // Click-away must NEVER fire a generation: mid-edit trips to copy text
@@ -340,13 +349,15 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
   // Stale at glyph tier: the seal itself wears the amber ring — there is no
   // card corner left to pin the dot to
   const staleRing = isStale && glyphTier ? ' ring-4 ring-amber-400' : '';
+  // "Continue last thread" hover: this node is the flight destination
+  const isBeacon = useUiStore((s) => s.beaconNodeId === id);
   const showTakeaway = !!versionSummary && !data.isLoading && !data.isEditingResponse;
 
   return (
     <div
       ref={nodeRef}
       style={zoomedOut && occupyH > 0 ? { height: occupyH, minHeight: occupyH } : undefined}
-      className={`thought-node rounded-xl w-[520px] ${zoomedOut ? 'h-full map-node ' : ''}${glyphTier ? 'glyph-node ' : ''}animate-fade-in transition-colors duration-200 ${condenseLit ? 'condense-lit ' : ''}${data.archived ? 'opacity-35 saturate-50 ' : ''}${isWaitingUpstream ? 'opacity-60 ' : ''}${
+      className={`thought-node relative rounded-xl w-[520px] ${zoomedOut ? 'h-full map-node ' : ''}${glyphTier ? 'glyph-node ' : ''}${isBeacon ? 'beacon-node ' : ''}animate-fade-in transition-colors duration-200 ${condenseLit ? 'condense-lit ' : ''}${data.archived ? 'opacity-35 saturate-50 ' : ''}${isWaitingUpstream ? 'opacity-60 ' : ''}${
         data.isEvaluator ? 'evaluator-node' : isHuman ? 'human-node' : isBranch ? 'orange-node' : isRoot ? 'root-node' : 'branch-node'
       } ${data.isLoading ? 'loading-border' : ''} ${selectedNodeId === id ? `ring-2 ring-accent !border-accent selected-glow${glyphTier ? ' glyph-selected' : ''}` : ''} ${isDropTarget ? 'ring-2 ring-accent/50 ring-dashed' : ''}`}
       onClick={() => setSelectedNodeId(id)}
@@ -371,6 +382,13 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDropTarget(true); }}
       onDragLeave={() => setIsDropTarget(false)}
     >
+      {data.focusRole === 'down' && !glyphTier && (
+        // Context Focus: floating corner tag — the card may have no meta
+        // row yet (unanswered follow-up), so it cannot live there
+        <span className="absolute -top-2.5 right-4 z-10 text-2xs text-accent/80 bg-card border border-line rounded-full px-2 py-px shadow-sm whitespace-nowrap" data-focus-down>
+          {t('focus.downstream')}
+        </span>
+      )}
       <Handle
         type="target"
         position={Position.Top}
@@ -616,11 +634,28 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
                 rows={2}
                 autoFocus
               />
-              {/* What Enter will do is invisible without being told — the
-                  hint switches as soon as the draft actually differs. */}
+              {/* Revision confirms explicitly: visible exits instead of an
+                  invisible Enter contract. mousedown-preventDefault keeps the
+                  textarea's blur from racing the click. */}
               {!isHuman && !isAwaitingAsk && (
-                <div className="text-2xs text-ink-faint mt-1 px-1">
-                  {editValue.trim() !== data.question ? t('question.editHintChanged') : t('question.editHintUnchanged')}
+                <div className="flex items-center justify-end gap-2 mt-1.5">
+                  <button
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setEditing(id, false)}
+                    className="text-xs text-ink-muted hover:text-red-500 hover:bg-wash px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                    data-edit-cancel
+                  >
+                    <X size={12} strokeWidth={2} /> {t('question.editCancel')}
+                  </button>
+                  <button
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={handleEditSubmit}
+                    disabled={!editValue.trim()}
+                    className="text-xs bg-accent hover:bg-accent-strong disabled:opacity-30 disabled:cursor-not-allowed text-white px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                    data-edit-submit
+                  >
+                    <Check size={12} strokeWidth={2.25} /> {t('question.editSubmit')}
+                  </button>
                 </div>
               )}
               {isHuman && (
@@ -803,12 +838,25 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
                   <Pencil size={13} strokeWidth={1.75} />
                 </button>
               )}
+              {data.focusRole === 'ctx' && (
+                <span className="w-[7px] h-[7px] rounded-full bg-accent inline-block ml-1 shrink-0" title={t('focus.inContext')} data-focus-dot />
+              )}
               {(data.generatedBy?.[data.responseIndex]) && (
                 <span
                   className="text-2xs text-ink-faint font-mono ml-1 truncate max-w-[150px]"
                   title={t('node.generatedByTitle')}
                 >
                   {data.generatedBy[data.responseIndex]!.split('/').pop()}
+                </span>
+              )}
+              {data.gatewaySearches?.[data.responseIndex] && (
+                <span className="text-2xs text-ink-faint ml-1 shrink-0" title={t('node.gatewaySearchedTitle')} data-gateway-searched>
+                  🌐 {t('node.gatewaySearched')}
+                </span>
+              )}
+              {data.generatedAts?.[data.responseIndex] && (
+                <span className="text-2xs text-ink-faint font-mono ml-1 shrink-0" title={t('node.generatedAtTitle')} data-generated-at>
+                  {formatStamp(data.generatedAts[data.responseIndex]!)}
                 </span>
               )}
               {hasMultipleVersions && (

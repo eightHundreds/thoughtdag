@@ -88,6 +88,10 @@ export interface ThoughtData extends Record<string, unknown> {
   linkUrl?: string; // link node: the source URL
   linkTitle?: string; // link node: page title (or a ⚠-prefixed fetch error)
   linkFetchedAt?: string; // link node: ISO timestamp of the snapshot (web content drifts)
+  /** link node: the sanit-ready page HTML captured at fetch time. Serves the
+      reader's original view only — context always reads the extracted copy
+      in `question`. Absent on old snapshots and non-HTML fetches. */
+  linkSnapshotHtml?: string;
   frameColor?: string; // frame node: fixed-palette color token (wayfinding, not decoration)
   frameCarry?: boolean; // frame node: dragging carries contained nodes (absent = true; new frames start false so they can be adjusted into place first)
   instruction?: string; // paradigm body: the prompt (prompt node) or operator guidance (human node)
@@ -105,6 +109,9 @@ export interface ThoughtData extends Record<string, unknown> {
       Recorded at generation time so switching the global model later never
       obscures where an old answer came from. */
   generatedBy?: (string | undefined | null)[];
+  /** Per version: this answer used the model gateway's built-in web search
+      (no tool pings from the proxy, so the stream flags it once instead). */
+  gatewaySearches?: (boolean | undefined)[];
   /** Epistemic move per version: insight (default, unmarked) | ruleout |
       decision | pivot | open. Auto-labeled by the takeaway judge; display
       layer only. */
@@ -154,6 +161,10 @@ export interface ThoughtData extends Record<string, unknown> {
   isEvaluator?: boolean;
   /** auto = re-critique whenever the watched subtree produces new content. */
   evaluatorTrigger?: 'auto' | 'manual';
+  /** Context Focus role, set ONLY by the render pipeline (displayNodes) —
+      never persisted. target = the focused node, ctx = feeds its context,
+      down = one structural step downstream (not in context). */
+  focusRole?: 'target' | 'ctx' | 'down';
 }
 
 export type ThoughtNode = Node<ThoughtData, 'thought'>;
@@ -176,6 +187,10 @@ export interface ThoughtEdge extends Edge {
         connect). Most edges are born with their target node — consumers
         should fall back to the target's createdAt. */
     createdAt?: string;
+    /** Context Focus role, set ONLY by the render pipeline — never persisted.
+        path = structural feed line, ref = reference into the context,
+        down = one step downstream. */
+    focusRole?: 'path' | 'ref' | 'down';
   };
 }
 

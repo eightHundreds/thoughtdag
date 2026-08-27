@@ -16,10 +16,11 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import 'highlight.js/styles/github.css';
-import { BookOpen, Brain, CircleHelp, Download, Drama, Eye, FileText, Frame, GitBranch, Highlighter, KeyRound, LayoutGrid, Loader2, MessageCircleQuestion, MoreHorizontal, Paperclip, Redo2, Scissors, Search, Share2, SquareTerminal, Stethoscope, StickyNote, Trash2, Undo2, Workflow, X, ListRestart, FolderSync, Minimize2 } from 'lucide-react';
+import { BookOpen, Brain, CircleHelp, Download, Drama, Eye, FileText, Frame, GitBranch, Highlighter, ImageDown, KeyRound, LayoutGrid, Loader2, MessageCircleQuestion, MoreHorizontal, Paperclip, Redo2, Scissors, Search, Share2, SquareTerminal, Stethoscope, StickyNote, Trash2, Undo2, Workflow, X, ListRestart, FolderSync, Minimize2, Rewind } from 'lucide-react';
 import './index.css';
 import ThoughtNode from './components/ThoughtNode';
 import ParadigmNode from './components/ParadigmNode';
+import { useAppearance, edgePalette, LEGACY_EDGE_HEX } from './lib/appearance';
 import ContentNode from './components/ContentNode';
 import FrameNode from './components/FrameNode';
 import ThoughtEdgeView from './components/ThoughtEdgeView';
@@ -39,9 +40,10 @@ import { set as idbSet } from 'idb-keyval';
 import { instantiateParadigm } from './lib/paradigm';
 import { isContentKind, spawnContentNode, ingestFiles, fetchLinkIntoNode, clipboardTextToMarkdown } from './lib/content';
 import { generateId, isImeComposing } from './utils';
+import { recapToNote, recapCamera } from './lib/recap';
 import type { Attachment, ThoughtNode as ThoughtNodeType, ThoughtEdge } from './types';
 import { processFile, FILE_INPUT_ACCEPT } from './lib/attachments';
-import { walkUpAncestors } from './lib/graph';
+import { walkUpAncestors, partitionContext } from './lib/graph';
 import { buildContext } from './store/context-builder';
 import { exportActiveParadigm, exportActiveProjectJson, exportEventLogCsv } from './lib/export';
 import { countTokens } from './utils';
@@ -51,7 +53,7 @@ import { lockWorkWrapper, unlockWorkWrapper } from './lib/layout';
 
 import { panelShift } from './lib/panel-shift';
 import { migrateActiveCanvasToVault, gcVaultAtBoot } from './lib/attachment-vault-boot';
-import { consumeOpenRouterCallback, startOpenRouterOAuth } from './lib/openrouter-oauth';
+import { consumeOpenRouterCallback, handMintedKeyToModal, startOpenRouterOAuth } from './lib/openrouter-oauth';
 import { bootDesktopUpdateUI } from './lib/desktop-update-ui';
 import { confirmDialog, toast, useUiStore } from './lib/ui-store';
 import ConfirmDialog from './components/ui/ConfirmDialog';
@@ -62,6 +64,7 @@ import MemoryManagerModal from './components/ui/MemoryManagerModal';
 import ApiKeyModal from './components/ui/ApiKeyModal';
 import ResponseViewer from './components/ui/ResponseViewer';
 import ShareDialog from './components/ui/ShareDialog';
+import ThoughtMapDialog from './components/ui/ThoughtMapDialog';
 import BackupDialog from './components/ui/BackupDialog';
 import CondenseDialog from './components/ui/CondenseDialog';
 import LangSwitch from './components/ui/LangSwitch';
@@ -75,7 +78,7 @@ import { useModels } from './lib/use-models';
 import { getZoomTier, useZoomTier } from './lib/use-map-mode';
 import { TimelineBar } from './components/ui/TimelineBar';
 import TimelineOverviewModal from './components/ui/TimelineOverviewModal';
-import { useStore as useRfStore } from '@xyflow/react';
+import { useStore as useRfStore, useReactFlow } from '@xyflow/react';
 
 // One node type key, three renderers: content nodes (notes / files) render
 // the same in every mode; otherwise the active project's kind decides
@@ -144,14 +147,15 @@ export default function App() {
   useEffect(() => { bootDesktopUpdateUI(); }, []);
 
   // A pending Sign-in-with-OpenRouter callback (?code=) resolves here: the
-  // exchange and provider registration run entirely in the browser.
+  // exchange runs entirely in the browser, then the ApiKeyModal opens on
+  // the model-picking view for the user to confirm what to enable.
   useEffect(() => {
     if (isViewerMode) return;
     void consumeOpenRouterCallback().then((r) => {
       if (!r) return;
-      if (r.status === 'connected') {
-        toast('success', fmt(ti('provider.oauthConnected'), { n: r.n }));
-        useUiStore.getState().pingModelPicker();
+      if (r.status === 'minted') {
+        toast('success', ti('provider.oauthMinted'));
+        handMintedKeyToModal(r.key);
       } else {
         toast('error', fmt(ti('provider.oauthFailed'), { error: r.error }));
       }
@@ -167,6 +171,7 @@ export default function App() {
       <ApiKeyModal />
       <ResponseViewer />
       <ShareDialog />
+      <ThoughtMapDialog />
       <BackupDialog />
       <ConfirmDialog />
       <Tutorial />
@@ -194,6 +199,24 @@ function Canvas() {
   const materialCount = useStore((s) => s.nodes.reduce((sum, n) =>
     sum + (n.data.attachments?.length ?? 0) + (['note', 'link'].includes(n.data.stepKind ?? '') ? 1 : 0), 0));
   const rfInstance = useRef<ReactFlowInstance<ThoughtNodeType, ThoughtEdge> | null>(null);
+  // Appearance: lighting swaps the token set, paper swaps the canvas texture
+  // (and turns the grid's snapping on). Edge colors resolve per theme.
+  const paperTexture = useAppearance((s) => s.paper);
+  const lightingChoice = useAppearance((s) => s.lighting);
+  const resolvedTheme = useAppearance((s) => s.resolved);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const themePalette = useMemo(() => edgePalette(), [resolvedTheme]);
+  // minimap colors resolve per theme too (its mask is the canvas surface)
+  const minimapColors = useMemo(() => {
+    const cs = getComputedStyle(document.documentElement);
+    const surface = (cs.getPropertyValue('--color-surface').trim() || '#FAF9F7').replace('#', '');
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(surface.slice(i, i + 2), 16));
+    return {
+      mask: `rgba(${r},${g},${b},0.7)`,
+      archived: cs.getPropertyValue('--color-wash').trim() || '#EFEDE9',
+      ordinary: resolvedTheme === 'dark' ? '#6E6759' : '#B9B3AB',
+    };
+  }, [resolvedTheme]);
   const prevNodeCount = useRef(nodes.length);
   // Every "center on node" goes through here: when the focus panel is open
   // the visual center sits half the panel further left, so the target shifts
@@ -849,6 +872,29 @@ function Canvas() {
   // material stays — it's part of the reasoning record). A filter over the
   // render, not a layer system: the semantic layering already lives in edges.
   const searchHitIds = useUiStore((s2) => s2.searchHitIds);
+  // Context Focus: single-selection lights up what the node actually
+  // receives (mainline + materials + reference sources, via the same
+  // partitionContext the prompt builder uses) and dims the rest. Read-only.
+  const focusSets = useMemo(() => {
+    if (!selectedNodeId || selectedNodeIds.length > 1) return null;
+    if (!nodes.some((n) => n.id === selectedNodeId)) return null;
+    const part = partitionContext(selectedNodeId, nodes, edges);
+    const ctx = new Set<string>();
+    for (const n of part.mainline) if (n.id !== selectedNodeId) ctx.add(n.id);
+    for (const n of part.materials) ctx.add(n.id);
+    for (const r of part.references) ctx.add(r.source.id);
+    const structural = edges.filter((e) => !e.data?.isCrossLink);
+    const pathEdgeIds = walkUpAncestors(selectedNodeId, nodes, structural).visitedEdgeIds;
+    const refEdgeIds = new Set(part.references.map((r) => r.edge.id));
+    const downOut = structural.filter((e) => e.source === selectedNodeId);
+    return {
+      ctx,
+      down: new Set(downOut.map((e) => e.target)),
+      pathEdgeIds, refEdgeIds,
+      downEdgeIds: new Set(downOut.map((e) => e.id)),
+    };
+  }, [selectedNodeId, selectedNodeIds, nodes, edges]);
+
   const displayNodes = useMemo((): typeof nodes => {
     let out = nodes;
     if (annotationsHidden) {
@@ -867,18 +913,76 @@ function Canvas() {
           : n.className === 'search-hit' ? { ...n, className: undefined } : n
       ));
     }
+    if (focusSets) {
+      out = out.map((n) => {
+        const role = n.id === selectedNodeId ? 'target'
+          : focusSets.ctx.has(n.id) ? 'ctx'
+          : focusSets.down.has(n.id) ? 'down'
+          : n.data.stepKind === 'frame' ? undefined : 'dim';
+        if (!role) return n;
+        return {
+          ...n,
+          className: [n.className, `focus-${role}`].filter(Boolean).join(' '),
+          ...(role !== 'dim' ? { data: { ...n.data, focusRole: role as 'target' | 'ctx' | 'down' } } : {}),
+        };
+      });
+    }
     return out;
-  }, [nodes, edges, annotationsHidden, searchHitIds]);
+  }, [nodes, edges, annotationsHidden, searchHitIds, focusSets, selectedNodeId]);
 
   const highlightedEdges = useMemo((): ThoughtEdge[] => {
     // Visual law: SOLID = structural (conversation, layout, cascade),
     // DASHED = bypass (references, watch). Explore branches are structural,
     // so legacy dashed-orange branch edges are normalized to solid here
     // (styles persist per edge; this fixes old canvases centrally).
-    const base = edges.map((e) => e.data?.isBranchFromSelection
-      ? { ...e, animated: false, style: { ...e.style, strokeDasharray: undefined } }
-      : e);
-    const activeIds = selectedNodeIds.length > 0 ? selectedNodeIds : (selectedNodeId ? [selectedNodeId] : []);
+    // Theme mapping happens here too: storage keeps the canonical light hex
+    // as the edge's semantic identity, the render layer resolves it against
+    // the active theme — old backups need no migration.
+    const base = edges.map((raw) => {
+      const e = raw.data?.isBranchFromSelection
+        ? { ...raw, animated: false, style: { ...raw.style, strokeDasharray: undefined } }
+        : raw;
+      const strokeSlot = typeof e.style?.stroke === 'string' ? LEGACY_EDGE_HEX[e.style.stroke.toUpperCase()] : undefined;
+      const marker = e.markerEnd && typeof e.markerEnd === 'object' ? e.markerEnd : undefined;
+      const markerSlot = typeof marker?.color === 'string' ? LEGACY_EDGE_HEX[marker.color.toUpperCase()] : undefined;
+      if (!strokeSlot && !markerSlot) return e;
+      return {
+        ...e,
+        ...(strokeSlot ? { style: { ...e.style, stroke: themePalette[strokeSlot] } } : {}),
+        ...(markerSlot && marker ? { markerEnd: { ...marker, color: themePalette[markerSlot] } } : {}),
+      };
+    });
+    if (focusSets) {
+      return base.map((e) => {
+        if (focusSets.pathEdgeIds.has(e.id)) {
+          return {
+            ...e,
+            className: 'focus-e-path',
+            style: { ...e.style, stroke: themePalette.accent, strokeWidth: 3.5, opacity: 1 },
+            markerEnd: { type: 'arrowclosed' as const, ...((e.markerEnd && typeof e.markerEnd === 'object') ? e.markerEnd : {}), color: themePalette.accent },
+            zIndex: 10,
+            data: { ...e.data, focusRole: 'path' as const },
+          };
+        }
+        if (focusSets.refEdgeIds.has(e.id)) {
+          // reference INTO the context: it feeds the model (as a fenced
+          // block), so it stays visible — dashed identity untouched
+          return { ...e, style: { ...e.style, opacity: 0.9 }, zIndex: 5, data: { ...e.data, focusRole: 'ref' as const } };
+        }
+        if (focusSets.downEdgeIds.has(e.id)) {
+          return {
+            ...e,
+            className: 'focus-e-down',
+            style: { ...e.style, strokeWidth: 2.5, opacity: 0.85 },
+            markerEnd: { type: 'arrowclosed' as const, ...((e.markerEnd && typeof e.markerEnd === 'object') ? e.markerEnd : {}) },
+            zIndex: 5,
+            data: { ...e.data, focusRole: 'down' as const },
+          };
+        }
+        return { ...e, style: { ...e.style, strokeWidth: 1.5, opacity: 0.2 }, zIndex: 0 };
+      });
+    }
+    const activeIds = selectedNodeIds.length > 1 ? selectedNodeIds : [];
     if (activeIds.length === 0) return base;
 
     // Walk up from each selected node, collect all ancestor edge ids
@@ -888,8 +992,8 @@ function Canvas() {
       if (ancestorEdgeIds.has(e.id)) {
         return {
           ...e,
-          style: { ...e.style, stroke: COLORS.trace, strokeWidth: 3.5, opacity: 1 },
-          markerEnd: { type: 'arrowclosed' as const, ...((e.markerEnd && typeof e.markerEnd === 'object') ? e.markerEnd : {}), color: COLORS.trace },
+          style: { ...e.style, stroke: themePalette.trace, strokeWidth: 3.5, opacity: 1 },
+          markerEnd: { type: 'arrowclosed' as const, ...((e.markerEnd && typeof e.markerEnd === 'object') ? e.markerEnd : {}), color: themePalette.trace },
           zIndex: 10,
         };
       }
@@ -900,7 +1004,7 @@ function Canvas() {
         zIndex: 0,
       };
     });
-  }, [nodes, edges, selectedNodeId, selectedNodeIds]);
+  }, [nodes, edges, selectedNodeIds, themePalette, focusSets]);
 
   // The panel is an overlay — the canvas never resizes. When it opens (or
   // the selection moves while it is open) and the selected node would be
@@ -989,6 +1093,7 @@ function Canvas() {
       <ReactFlow
         onInit={(instance) => {
           rfInstance.current = instance;
+          recapCamera.current = instance;
           // Debug: expose the flow instance for screenshot/e2e scripts (DEV only)
           if (import.meta.env.DEV) (window as unknown as { __rf?: typeof instance }).__rf = instance;
         }}
@@ -1020,9 +1125,11 @@ function Canvas() {
         defaultEdgeOptions={{
           type: 'smoothstep',
           animated: false,
-          style: { stroke: COLORS.accent, strokeWidth: 2 },
-          markerEnd: { type: 'arrowclosed' as const, color: COLORS.accent, width: 18, height: 18 },
+          style: { stroke: themePalette.accent, strokeWidth: 2 },
+          markerEnd: { type: 'arrowclosed' as const, color: themePalette.accent, width: 18, height: 18 },
         }}
+        snapToGrid={paperTexture === 'grid'}
+        snapGrid={[22, 22]}
         proOptions={{ hideAttribution: true }}
         nodeDragThreshold={5}
         connectionRadius={40}
@@ -1037,12 +1144,21 @@ function Canvas() {
         zoomOnScroll={!isMacTrackpad}
         zoomOnPinch
         zoomOnDoubleClick={false}
-        connectionLineStyle={{ stroke: COLORS.accent, strokeDasharray: '8 4', strokeWidth: 2 }}
+        connectionLineStyle={{ stroke: themePalette.accent, strokeDasharray: '8 4', strokeWidth: 2 }}
         onSelectionChange={onSelectionChange}
         onPaneClick={() => { setSelectedNodeId(null); setSelectedNodeIds([]); setNodeMenu(null); }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#E8E5E0" />
+        {paperTexture === 'grid' ? (
+          <>
+            {/* the drafting board: fine grid + a major line every 5 cells */}
+            <Background id="grid-fine" variant={BackgroundVariant.Lines} gap={22} color="var(--canvas-grid-fine)" />
+            <Background id="grid-major" variant={BackgroundVariant.Lines} gap={110} color="var(--canvas-grid-major)" />
+          </>
+        ) : (
+          <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="var(--canvas-dot)" />
+        )}
         <ZoomTierTag />
+        <ThoughtMapPill />
         <TimelineBar />
         <Controls position="bottom-left" />
         {nodes.length > 0 && <MiniMap
@@ -1050,15 +1166,15 @@ function Canvas() {
             const data = node.data as Record<string, unknown>;
             // information density over decoration: type is color, archived
             // fades to paper, ordinary turns stay a readable mid-gray
-            if (data.archived) return '#EFEDE9';
+            if (data.archived) return minimapColors.archived;
             const sk = data.stepKind as string | undefined;
             if (sk === 'note') return '#D97706';
             if (sk === 'file' || sk === 'link') return '#64748B';
             if (Array.isArray(data.condensedFrom) && data.condensedFrom.length) return '#8B7CF0';
-            return data.isRoot ? COLORS.accent : data.isBranch ? COLORS.warm : '#B9B3AB';
+            return data.isRoot ? themePalette.accent : data.isBranch ? themePalette.warm : minimapColors.ordinary;
           }}
-          maskColor="rgba(250,249,247,0.7)"
-          style={{ background: COLORS.card, width: 200, height: 140 }}
+          maskColor={minimapColors.mask}
+          style={{ width: 200, height: 140 }}
           pannable
           zoomable
           position="bottom-right"
@@ -1272,32 +1388,50 @@ function Canvas() {
               ))}
             </div>
 
-            {/* Quick connect: the no-model landing points at the lowest-
-                friction door per language — GLM's free tier for zh, the
-                one-click OpenRouter OAuth for en (free-tier models included,
-                key minted in this browser). Gone once any model exists. */}
+            {/* Quick connect: the no-model landing offers the two free doors
+                side by side — GLM's free tier (zh only) and the one-click
+                OpenRouter OAuth (free-tier models included, key minted in
+                this browser) — plus one quiet line for subscription owners.
+                Gone once any model exists. */}
             {(!modelData || (modelData.models?.length ?? 0) === 0) && (
-              <div className="mt-3 bg-card/70 backdrop-blur border border-line/70 rounded-xl px-4 py-3 flex items-center gap-3 hover:border-line-strong transition-colors" data-quick-connect>
-                <KeyRound size={16} strokeWidth={1.75} className="text-accent shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-xs font-semibold text-ink mb-0.5">{t('landing.quickTitle')}</h3>
-                  <p className="text-2xs text-ink-faint leading-relaxed">{t('landing.quickDesc')}</p>
+              <div className="mt-3 bg-card/70 backdrop-blur border border-line/70 rounded-xl px-4 py-3 hover:border-line-strong transition-colors" data-quick-connect>
+                <div className="flex items-start gap-3">
+                  <KeyRound size={16} strokeWidth={1.75} className="text-accent shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-xs font-semibold text-ink mb-0.5">{t('landing.quickTitle')}</h3>
+                    <p className="text-2xs text-ink-faint leading-relaxed">{t('landing.quickDesc')}</p>
+                  </div>
+                </div>
+                <div className="mt-2.5 pl-7 flex items-center flex-wrap gap-2">
+                  {lang === 'zh' && (
+                    <button
+                      onClick={() => { useUiStore.getState().setApiKeyPresetHint('zhipu'); useUiStore.getState().setApiKeyModalOpen(true); }}
+                      className="text-2xs bg-accent/10 text-accent hover:bg-accent/20 font-medium px-3 py-1.5 rounded-lg transition-colors shrink-0"
+                      data-quick-zhipu
+                    >
+                      {t('landing.quickZhipu')}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => void startOpenRouterOAuth()}
+                    className="text-2xs bg-accent/10 text-accent hover:bg-accent/20 font-medium px-3 py-1.5 rounded-lg transition-colors shrink-0"
+                    data-quick-primary
+                  >
+                    {t('landing.quickOpenRouter')}
+                  </button>
+                  <button
+                    onClick={() => useUiStore.getState().setApiKeyModalOpen(true)}
+                    className="text-2xs text-ink-muted hover:text-ink hover:bg-wash font-medium px-3 py-1.5 rounded-lg transition-colors shrink-0"
+                  >
+                    {t('landing.quickOther')}
+                  </button>
                 </div>
                 <button
-                  onClick={() => {
-                    if (lang === 'zh') { useUiStore.getState().setApiKeyPresetHint('zhipu'); useUiStore.getState().setApiKeyModalOpen(true); }
-                    else void startOpenRouterOAuth();
-                  }}
-                  className="text-2xs bg-accent/10 text-accent hover:bg-accent/20 font-medium px-3 py-1.5 rounded-lg transition-colors shrink-0"
-                  data-quick-primary
-                >
-                  {t('landing.quickPrimary')}
-                </button>
-                <button
                   onClick={() => useUiStore.getState().setApiKeyModalOpen(true)}
-                  className="text-2xs text-ink-muted hover:text-ink hover:bg-wash font-medium px-3 py-1.5 rounded-lg transition-colors shrink-0"
+                  className="mt-2 pl-7 text-2xs text-ink-faint hover:text-accent transition-colors block text-left"
+                  data-quick-subs
                 >
-                  {t('landing.quickOther')}
+                  {t('landing.quickSubs')}
                 </button>
               </div>
             )}
@@ -1664,6 +1798,37 @@ function Canvas() {
                 </button>
               )}
               {hasNodes && <div className="border-t border-line/60 my-1" />}
+              {/* appearance: two independent axes — lighting remaps the
+                  tokens, paper retextures the canvas (and arms snapping) */}
+              <div className="px-3 pt-2 pb-1" data-appearance-lighting>
+                <div className="text-2xs text-ink-faint mb-1.5">{t('appearance.lighting')}</div>
+                <div className="flex rounded-lg border border-line overflow-hidden text-2xs">
+                  {([['light', t('appearance.light')], ['dark', t('appearance.dark')], ['system', t('appearance.system')]] as const).map(([v, label], i) => (
+                    <button
+                      key={v}
+                      onClick={() => useAppearance.getState().setLighting(v)}
+                      className={`flex-1 px-1 py-1.5 transition-colors ${i > 0 ? 'border-l border-line' : ''} ${lightingChoice === v ? 'bg-accent/10 text-accent font-medium' : 'text-ink-muted hover:bg-wash'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="px-3 pt-1 pb-2" data-appearance-paper>
+                <div className="text-2xs text-ink-faint mb-1.5">{t('appearance.paper')}</div>
+                <div className="flex rounded-lg border border-line overflow-hidden text-2xs">
+                  {([['plain', t('appearance.plain')], ['grid', t('appearance.grid')]] as const).map(([v, label], i) => (
+                    <button
+                      key={v}
+                      onClick={() => useAppearance.getState().setPaper(v)}
+                      className={`flex-1 px-1 py-1.5 transition-colors ${i > 0 ? 'border-l border-line' : ''} ${paperTexture === v ? 'bg-accent/10 text-accent font-medium' : 'text-ink-muted hover:bg-wash'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="border-t border-line/60 my-1" />
               <button
                 onClick={() => { setMoreOpen(false); useUiStore.getState().setMemoryManagerOpen(true); }}
                 className="w-full text-left px-3 py-2 text-xs text-ink hover:bg-wash transition-colors flex items-center gap-2.5"
@@ -1789,6 +1954,81 @@ function Canvas() {
   );
 }
 
+
+// The moment of looking at the shape IS the moment of wanting to share it:
+// the pill exists only in the map/glyph tiers, the working tier stays
+// silent. Must live inside <ReactFlow> to reach the flow store.
+function ThoughtMapPill() {
+  const tier = useZoomTier();
+  const t = useT();
+  const rf = useReactFlow();
+  const nodeCount = useStore((s) => s.nodes.length);
+  const nodes = useStore((s) => s.nodes);
+  const panelOpenWidth = useUiStore((s) => (s.panelOpen ? s.panelWidth : 0));
+
+  // The flight destination: the thought node touched most recently.
+  // Content nodes (notes, files, links, frames) never count as "work".
+  const lastActive = useMemo(() => {
+    let best: (typeof nodes)[number] | null = null;
+    let bestAt = '';
+    for (const n of nodes) {
+      if (n.data.stepKind && n.data.stepKind !== 'human' && n.data.stepKind !== 'prompt') continue;
+      const at = [n.data.lastGeneratedAt, n.data.askedAt, n.data.createdAt,
+        ...(n.data.editedAts ?? [])].filter(Boolean).sort().pop() as string | undefined;
+      if (at && at > bestAt) { bestAt = at; best = n; }
+    }
+    return best ? { node: best, at: bestAt } : null;
+  }, [nodes]);
+
+  if (isViewerMode || tier === 'work' || nodeCount < 2) return null;
+
+  const flyBack = () => {
+    if (!lastActive) return;
+    useUiStore.getState().setBeaconNodeId(null);
+    const { node } = lastActive;
+    rf.setCenter(node.position.x + 260, node.position.y + 110, { zoom: 1, duration: 1100 });
+    // three beats: flight → panel opens (recentered for its width) → recap toast
+    window.setTimeout(() => {
+      useStore.getState().setSelectedNodeId(node.id);
+      useUiStore.getState().setPanelOpen(true);
+      window.setTimeout(() => {
+        rf.setCenter(node.position.x + 260 + panelShift(node.id) / 2, node.position.y + 110, { zoom: 1, duration: 300 });
+      }, 60);
+    }, 1150);
+    window.setTimeout(() => {
+      toast('success', t('continue.arrived'), 12000,
+        { label: t('continue.summarize'), run: () => void recapToNote(node.id) });
+    }, 1550);
+  };
+
+  return (
+    <div
+      className="absolute bottom-6 z-10 flex items-center gap-2 -translate-x-1/2 transition-[left] duration-300"
+      style={{ left: `calc((100% - ${panelOpenWidth}px) / 2)` }}
+      data-map-dock
+    >
+      <button
+        onClick={() => useUiStore.getState().setThoughtMapOpen(true)}
+        data-tmap-pill
+        className="flex items-center gap-2 bg-card/95 backdrop-blur border border-line-strong rounded-full px-5 py-2.5 text-sm text-ink shadow-lg hover:border-accent/40 hover:text-accent transition-colors"
+      >
+        <ImageDown size={16} strokeWidth={1.75} /> {t('tmap.export')}
+      </button>
+      {lastActive && (
+        <button
+          onClick={flyBack}
+          onMouseEnter={() => useUiStore.getState().setBeaconNodeId(lastActive.node.id)}
+          onMouseLeave={() => useUiStore.getState().setBeaconNodeId(null)}
+          title={t('continue.buttonTitle')}
+          data-continue-pill
+          className="flex items-center gap-2 bg-accent text-white rounded-full px-5 py-2.5 text-sm shadow-lg hover:bg-accent-strong transition-colors"
+        >
+          <Rewind size={16} strokeWidth={1.75} /> {t('continue.button')}
+        </button>
+      )}
+    </div>
+  );
+}
 
 // Stamps the current semantic-zoom tier on the canvas element so CSS can
 // restyle global layers, and streams the live zoom into a CSS variable so

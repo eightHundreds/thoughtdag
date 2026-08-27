@@ -135,9 +135,19 @@ interface UiState {
   /** Preset the ApiKeyModal should open onto (landing quick-connect). */
   apiKeyPresetHint: string | null;
   setApiKeyPresetHint: (id: string | null) => void;
+  /** A freshly OAuth-minted OpenRouter key awaiting the user's model
+      confirmation in the ApiKeyModal (consumed on pickup, never stored). */
+  oauthMintedKey: string | null;
+  setOauthMintedKey: (key: string | null) => void;
+  /** Node pulsing a beacon ripple (hovering "continue last thread"). */
+  beaconNodeId: string | null;
+  setBeaconNodeId: (id: string | null) => void;
   /** Share dialog: the freshly built read-only link (null = closed). */
   shareDialogUrl: string | null;
   setShareDialogUrl: (url: string | null) => void;
+  /** Thought-map export console (structure-only share image). */
+  thoughtMapOpen: boolean;
+  setThoughtMapOpen: (v: boolean) => void;
   /** Viewer boot failed to decode the #view= hash (truncated link). */
   viewerLoadError: boolean;
   setViewerLoadError: (v: boolean) => void;
@@ -263,9 +273,15 @@ export const useUiStore = create<UiState>((set, get) => ({
   setAdvancedMode: (v) => { localStorage.setItem('thoughtdag.advanced', v ? '1' : '0'); set({ advancedMode: v }); },
   apiKeyPresetHint: null,
   setApiKeyPresetHint: (id) => set({ apiKeyPresetHint: id }),
+  oauthMintedKey: null,
+  setOauthMintedKey: (key) => set({ oauthMintedKey: key }),
+  beaconNodeId: null,
+  setBeaconNodeId: (id) => set({ beaconNodeId: id }),
   setBackupDialogOpen: (v) => set({ backupDialogOpen: v }),
   shareDialogUrl: null,
   setShareDialogUrl: (url) => set({ shareDialogUrl: url }),
+  thoughtMapOpen: false,
+  setThoughtMapOpen: (v) => set({ thoughtMapOpen: v }),
   viewerLoadError: false,
   setViewerLoadError: (v) => set({ viewerLoadError: v }),
   readerNodeId: null,

@@ -6,18 +6,16 @@
 
 **Your thinking deserves a map.** An infinite canvas where LLM conversations grow into an editable thought graph.
 
-![React](https://img.shields.io/badge/React_19-087EA4?logo=react&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-active_development-6B5CE7)
 
 ### [Download ↓](https://chenxiachan.github.io/thoughtdag/#download) · [Website](https://chenxiachan.github.io/thoughtdag/)
 
-[中文](./README_ZH.md) · [Quick start](#quick-start) · [Desktop app](#desktop-app) · [How it differs](#how-thoughtdag-differs) · [Models & subscriptions](#models--subscriptions) · [Cost & privacy](#cost--privacy)
+[中文](./README_ZH.md) · [Quick start](#quick-start) · [How it differs](#how-thoughtdag-differs) · [Research](#-research-why-editable-context-matters) · [Models & privacy](#models-cost--privacy)
 
 <img src="docs/hero-demo-en.gif" alt="Hero demo, recorded from the live app: selecting a passage in the PDF reader and asking about it; deleting a noise edge and regenerating a clean answer; zooming out through three semantic tiers to the map; opening the backup control center and exporting a real file" width="100%"/>
 
-<a href="https://www.youtube.com/watch?v=-8BqAyaoNXQ"><img src="https://img.youtube.com/vi/-8BqAyaoNXQ/maxresdefault.jpg" width="440" alt="Video thumbnail: the ThoughtDAG canvas mid-conversation" /></a>
+<p align="center"><a href="https://www.youtube.com/watch?v=-8BqAyaoNXQ"><img src="https://img.youtube.com/vi/-8BqAyaoNXQ/maxresdefault.jpg" alt="YouTube thumbnail for the ThoughtDAG narrated tour" width="640" /></a></p>
 
 **[▶ The 33-second narrated tour](https://www.youtube.com/watch?v=-8BqAyaoNXQ)**
 
@@ -26,6 +24,8 @@
 ## The one rule
 
 > **Wires are the context.** What the model sees is exactly what wires into the node. Editing the graph edits the model's memory.
+
+Many tools put conversations on a canvas. In ThoughtDAG, a wire is not decoration or an execution route. It determines what the model sees next.
 
 ## In action
 
@@ -59,46 +59,50 @@ Select a passage, ask right there. The answer lands on the canvas with its page 
 
 <table>
 <tr>
-<td width="45%"><img src="docs/illus/condense-en.svg" alt="Illustration: three small highlighted cards converge through wires into one synthesis card, above a small timeline with cognitive badges"/></td>
-<td width="55%">
-
-### 💎 Thinking condenses in your hands
-
-Merge nodes into one higher conclusion; weave highlights into a summary. The graph folds inward instead of sprawling. **The human refines in the loop.**
-
-</td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="55%">
-
-### 🖍️ The passages you marked, woven into cited prose
-
-Highlights are your judgment, not the model's. Check any subset and weave one passage where every sentence traces back.
-
-</td>
-<td width="45%"><img src="docs/illus/weave-en.svg" alt="Illustration: a highlighted sentence in a card woven into a cited passage below, with reference numbers"/></td>
-</tr>
-</table>
-
-<table>
-<tr>
 <td width="45%"><img src="docs/illus/map-en.svg" alt="Illustration: three takeaway plaques with ruled-out, decided and pivoted badges, linked by dashed lines"/></td>
 <td width="55%">
 
-### 🗺️ Zoom out: thinking becomes a map
+### 💎 Condense, zoom out, and export the shape
 
-Full cards, takeaway plaques, an icon skeleton: three semantic tiers, every step badged ✕ ⚖ ↩ ?. **The detours are part of the map.**
+Merge nodes into a higher conclusion; weave highlights into cited prose. Zoom through full cards, takeaway plaques and an icon skeleton. Then export the current structure as a light or dark Thought Map.
 
 </td>
 </tr>
 </table>
 
+## How ThoughtDAG differs
+
+Many products use nodes and edges, but the graph does a different job in each category.
+
+| Product category | How it differs from ThoughtDAG |
+|---|---|
+| Linear chat | Context follows one chronological thread; ThoughtDAG selects and merges visible paths. |
+| Mind maps and whiteboards | Edges organize ideas for people; ThoughtDAG edges also change model input. |
+| Branching chat canvases | They usually follow one inherited branch; ThoughtDAG can merge or prune several paths. |
+| Workflow and agent canvases | Edges run tasks and data; ThoughtDAG edges control conversational context. |
+| RAG and automatic memory | The system retrieves context automatically; ThoughtDAG makes the selection visible and editable. |
+
+ThoughtDAG is a user-authored context graph: incoming paths and explicit references form the next request, while excluded work stays visible on the canvas.
+
+## 🗺️ Export the shape of your thinking
+
+The export keeps the nodes, wires and high-level structural counts. Different questions and different ways of exploring them leave visibly different maps.
+
+<img src="docs/thought-map-four-en.png" alt="Four Thought Map exports showing a deep single thread, five explored branches, a three-week investigation and a literature review season" width="100%"/>
+
 ## Quick start
 
-The [desktop app](#desktop-app) is the primary way to run ThoughtDAG: download, open, think. Running from source works too:
+### Desktop app
+
+On macOS, install with Homebrew:
+
+```bash
+brew install --cask thoughtdag
+```
+
+Or use the [download page](https://chenxiachan.github.io/thoughtdag/#download), which detects your platform and gives you the right installer; [Releases](https://github.com/chenxiachan/thoughtdag/releases/latest) keeps every build. macOS builds are signed and notarized. Windows builds are not signed yet and may show a SmartScreen warning.
+
+### Run from source
 
 ```bash
 npm install
@@ -107,26 +111,23 @@ npm run dev       # → localhost:5173
 # No .env? Connect any OpenAI-compatible endpoint inside the app
 ```
 
+Environment variables, local models and connection details → [docs/setup.md](docs/setup.md)
+
+### Browser demo
+
 Want a ten-second look before installing anything? The [hosted demo](https://app.thoughtdag.workers.dev) runs in the browser, and the example canvas needs no key. It is a feature subset: keyless web search, some direct-connection tools and the subscription bridge are desktop/local-only.
 
-The landing page offers the seeded example canvas one labeled click away: four chapters around one everyday question (why saved articles stay unread), including a reading loop with a real embedded PDF. Environment variables, free keys and configuration details → [docs/setup.md](docs/setup.md)
+## 🧪 Research: Why editable context matters
 
-## Desktop app
+### Context Intervention Benchmark · Pilot v2
 
-The same app in its own window, with the local server bundled. No Node, no terminal. The easiest path is the [download page](https://chenxiachan.github.io/thoughtdag/#download): it detects your platform and hands you the right file.
+`9 models` · `1,485 test runs` · `$0 in free tiers` · `answers scored by exact match`
 
-Downloading from [Releases](https://github.com/chenxiachan/thoughtdag/releases/latest) directly? Pick by system:
+Context does not only fade as conversations grow longer. A wrong statement flows into the replies that come after it and undermines the truthfulness of every later conclusion. Our benchmark verified this across nine language models and found the effect to be widespread: deleting the message that introduced the error is often not enough, because the follow-up replies still carry it. Restoring correct answers required cleaning up the affected passage as a whole, or letting the model rewrite it. In one model whose step-by-step thinking we could switch on and off, the minimal cleanup only worked while thinking was on. Managing context, not just accumulating it, decides what a model gets right.
 
-| Your system | File to download |
-|-------------|------------------|
-| macOS, Apple Silicon (M1 and later) | `ThoughtDAG-x.y.z-arm64.dmg` |
-| macOS, Intel | `ThoughtDAG-x.y.z.dmg` |
-| Windows | `ThoughtDAG.Setup.x.y.z.exe` |
-| Linux | `ThoughtDAG-x.y.z.AppImage` |
+The full report explains the method, the numbers and their statistics, and what this does and does not establish. It does not rank models and does not explain their inner workings; it tests one observable claim: changing what a model sees changes what it answers next.
 
-Not sure which Mac you have? Apple menu → About This Mac. The `.zip`, `.blockmap` and `.yml` files serve the in-app updater; you never download them by hand.
-
-The macOS builds are signed and notarized by Apple: double-click and go. Windows builds are not signed yet; choose "More info → Run anyway" on the SmartScreen prompt. After installing, the app checks for new versions itself (canvas menu → Check for updates) and every step past looking waits for your click.
+📖 **[Read the first case study](https://chenxiachan.github.io/thoughtdag/stories/context-repair/)** · 📊 **[Methodology and results](https://chenxiachan.github.io/thoughtdag/research/context-repair-pilot-v2/)** · 🗳️ **[Suggest the next model](https://github.com/chenxiachan/thoughtdag/issues/new?template=suggest-next-model.yml)** · 🧪 **[Contribute a run or case](https://github.com/chenxiachan/thoughtdag/issues/new?template=contribute-benchmark.yml)**
 
 ## More capabilities
 
@@ -140,45 +141,24 @@ The macOS builds are signed and notarized by Apple: double-click and go. Windows
 
 Full feature list (60+, grouped by area) → [docs/features.md](docs/features.md)
 
-## How ThoughtDAG differs
-
-Many tools put conversations on a canvas. The difference is what the connections do.
-
-In ThoughtDAG, a wire is not decoration or an execution route. It determines what the model sees next.
-
-| Type | What a wire means | Better for |
-|------|-------------------|------------|
-| Linear chat | Conversation history in time order | Quick, simple questions |
-| Mind maps and whiteboards | Visual relations for human eyes | Free-form organizing and presenting |
-| Branching chat canvases | Parent-child forks of a conversation | Exploring alternative responses |
-| Workflow and agent canvases | Data flow or execution order | Automation and orchestration |
-| ThoughtDAG | The context the model actually receives next | Deliberate forking, merging, pruning and tracing of long-running thinking |
-
-If you already keep a hand-maintained decision tree in a markdown file, ThoughtDAG is that tree made operational: the model reads exactly the branches you wire in.
-
 ### Works beside your coding agent
 
-Give the canvas a folder and it becomes a live local file: turn on **automatic folder backup**, point it at your project directory, and every new node you land updates `<canvas-name>.thoughtdag.json` on disk as you work. And coding agents read files. That is the whole integration:
+Automatic folder backup keeps the canvas as a live `.thoughtdag.json` file in your project; Markdown export turns any context chain or selection into a plain `.md`. Coding agents can read either without a plugin, API or server.
 
-1. Ask your agent CLI to read the file. The `question`, `response` and `summaries` fields carry your full decision history, including which paths were ruled out and why.
-2. For the cleanest handoff, use **Markdown export**: any context chain or selection becomes a plain `.md` the agent reads natively.
+## Models, cost & privacy
 
-Example, inside any agent session: *"Read ./notes/research.thoughtdag.json and continue from the conclusions; the summaries field lists what was already ruled out."*
-
-No plugin, no API, no server. The same file doubles as real data safety: point the backup at a synced folder and it is also your cross-device backup.
-
-## Models & subscriptions
-
-Zhipu · Qwen · OpenAI · Anthropic · Google · DeepSeek · Kimi · OpenRouter · Ollama, or any OpenAI-compatible endpoint. Text-only models read already-indexed images through their companion text; unread images go to a vision model, announced. Environment variables and default models → [docs/setup.md](docs/setup.md)
-
-**Already paying for a subscription? It plugs in.** A ChatGPT plan connects through a one-command local bridge (with ThoughtDAG running locally). GLM Coding and Kimi Code plans issue real API keys: pick the preset, paste the key, done. Setup for all three → [docs/setup.md#subscriptions](docs/setup.md#subscriptions)
-
-## Cost & privacy
+Connect a local Ollama or any OpenAI-compatible endpoint. Built-in presets, subscription connections and environment variables are documented in [setup](docs/setup.md).
 
 - **The free model tier covers every feature**; a local Ollama runs fully offline
 - **In the desktop app everything lives on your machine**: canvases, keys, documents; on the web demo, model traffic runs browser-direct and keys never touch the server
 - **PDFs never leave your machine**; only extracted text travels when you ask
 - **The backup format stays backward compatible**; Markdown export is the permanent escape hatch
+
+## Supporters
+
+With gratitude to **@andreilaiter**, ThoughtDAG's first supporter, and to everyone helping this independent open-source project grow.
+
+<a href="https://buymeacoffee.com/chatchan92"><img src="docs/supporters/support-thoughtdag.svg" alt="Support ThoughtDAG" width="252" /></a>
 
 ---
 

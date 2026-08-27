@@ -1,14 +1,36 @@
 import type { Attachment } from '../types';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { generateId } from '../utils';
 import { extractPdf } from './api';
 import { PDF_VISION_PAGE_THRESHOLD } from './constants';
 import { internAttachment } from './attachment-vault';
+import { toast } from './ui-store';
+import { t } from '../i18n';
 
-export const TEXT_EXTENSIONS = /\.(md|txt|js|ts|tsx|jsx|py|json|csv|yaml|yml|toml|sh|bash|zsh|c|cpp|h|hpp|java|rs|go|rb|swift|kt|css|html|xml|sql|r|m|lua)$/i;
+// last-resort readable copy when the HTML extraction pipeline itself fails
+function stripHtmlTags(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s*\n\s*(\s*\n\s*)+/g, '\n\n')
+    .trim();
+}
+
+export const TEXT_EXTENSIONS = /\.(md|txt|js|ts|tsx|jsx|py|json|csv|yaml|yml|toml|sh|bash|zsh|c|cpp|h|hpp|java|rs|go|rb|swift|kt|css|xml|sql|r|m|lua)$/i;
+
+// HTML gets its own lane (extraction + rendered reader), not the text lane
+export const HTML_EXTENSIONS = /\.x?html?$/i;
+
+// Formats we do not parse but whose own apps export PDF in one click — met
+// with guidance instead of silence (readFileToAttachment returns null)
+const OFFICE_EXPORT_HINT = /\.(pptx?|key|odp|doc|rtf|odt|xlsx?|numbers|ods)$/i;
 
 // accept attribute for <input type="file"> — keep in sync with TEXT_EXTENSIONS
 export const FILE_INPUT_ACCEPT =
-  'image/*,.pdf,.txt,.md,.js,.ts,.tsx,.jsx,.py,.json,.csv,.yaml,.yml,.toml,.sh,.c,.cpp,.h,.java,.rs,.go,.rb,.swift,.css,.html,.xml,.sql';
+  'image/*,.pdf,.txt,.md,.js,.ts,.tsx,.jsx,.py,.json,.csv,.yaml,.yml,.toml,.sh,.c,.cpp,.h,.java,.rs,.go,.rb,.swift,.css,.html,.htm,.xml,.sql';
 
 // Identity of an attachment's content — used to dedup the same file uploaded
 // to multiple nodes or reached via multiple DAG paths.
@@ -24,6 +46,7 @@ export function readFileToAttachment(file: File): Promise<Attachment | null> {
     const addedAt = new Date().toISOString();
     const isImage = file.type.startsWith('image/');
     const isPDF = file.type === 'application/pdf' || file.name.endsWith('.pdf');
+    const isHTML = file.type === 'text/html' || HTML_EXTENSIONS.test(file.name);
     const isText = file.type.startsWith('text/') || TEXT_EXTENSIONS.test(file.name);
     const isDocx = file.name.toLowerCase().endsWith('.docx');
 
@@ -56,6 +79,12 @@ export function readFileToAttachment(file: File): Promise<Attachment | null> {
           resolve(null);
         }
       });
+    } else if (isHTML) {
+      // raw source only serves the reader's original view; the readable
+      // Markdown (extractedText) is produced async in processFile
+      file.text().then((text) => {
+        resolve({ id, name: file.name, type: 'text/html', size: file.size, addedAt, content: text });
+      });
     } else if (isText) {
       file.text().then((text) => {
         resolve({ id, name: file.name, type: file.type || 'text/plain', size: file.size, addedAt, content: text });
@@ -64,6 +93,47 @@ export function readFileToAttachment(file: File): Promise<Attachment | null> {
       resolve(null);
     }
   });
+}
+
+// Open a base64 PDF with pdfjs in the browser (worker configured by the import).
+async function openPdf(base64: string): Promise<PDFDocumentProxy> {
+  const [m, worker] = await Promise.all([
+    import('pdfjs-dist'),
+    import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
+  ]);
+  m.GlobalWorkerOptions.workerSrc = worker.default;
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  return m.getDocument({ data: bytes, verbosity: 0 }).promise;
+}
+
+const PAGE_RENDER_DPI = 150; // matches the proxy's pdftoppm default
+
+// Render every page to a base64 PNG in the browser — the local stand-in for
+// the proxy's poppler when it is absent (the desktop app inherits a GUI PATH
+// that hides Homebrew; the public demo has no backend at all). Same shape
+// the proxy returns; the reader and Recognize consume both interchangeably.
+async function renderPdfPages(doc: PDFDocumentProxy): Promise<string[]> {
+  const scale = PAGE_RENDER_DPI / 72; // PDF user units are 72/inch
+  const images: string[] = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const canvas = document.createElement('canvas');
+    try {
+      const page = await doc.getPage(i);
+      const viewport = page.getViewport({ scale });
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('no 2d context');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+    } catch {
+      // keep page numbering intact for (p.N) anchors and Recognize: a failed
+      // page becomes a blank frame instead of shifting every page after it
+      canvas.width = 8;
+      canvas.height = 8;
+    }
+    images.push(canvas.toDataURL('image/png').split(',')[1]);
+  }
+  return images;
 }
 
 export interface ProcessFileCallbacks {
@@ -79,8 +149,26 @@ export interface ProcessFileCallbacks {
  * PDFs run server-side extraction and deliver the result via `update`.
  */
 export async function processFile(file: File, cb: ProcessFileCallbacks): Promise<void> {
+  if (OFFICE_EXPORT_HINT.test(file.name)) {
+    toast('info', `${file.name}: ${t('content.officeExportHint')}`);
+    return;
+  }
   const att = await readFileToAttachment(file);
   if (!att) return;
+
+  if (att.type === 'text/html') {
+    cb.add({ ...att, isExtracting: true });
+    try {
+      const { extractHtmlMaterial } = await import('./html-material');
+      const r = await extractHtmlMaterial(att.content);
+      cb.update(att.id, { extractedText: r.markdown, numPages: r.numPages, isExtracting: false });
+    } catch {
+      // extraction machinery unavailable → the crude tag strip keeps the
+      // material usable (same net the link snapshot route uses)
+      cb.update(att.id, { extractedText: stripHtmlTags(att.content), isExtracting: false });
+    }
+    return;
+  }
 
   if (att.type !== 'application/pdf') {
     cb.add(att);
@@ -94,27 +182,36 @@ export async function processFile(file: File, cb: ProcessFileCallbacks): Promise
   cb.add({ ...light, isExtracting: true });
   try {
     const data = await extractPdf(att.content);
+    // A proxy whose pdfjs is broken answers 200 with an all-empty result
+    // (the desktop app did exactly this for every PDF). Treat it as the
+    // failure it is so the browser fallback below takes over.
+    if (!data.numPages && !data.text?.trim()) throw new Error('empty extraction result');
     const numPages = data.numPages || 0;
+    // The proxy answers without images when poppler is missing (minimal
+    // installs; a desktop launch never sees Homebrew's PATH). Pages matter —
+    // Recognize and the digest for scanned PDFs dead-end without them — so
+    // render them right here instead.
+    let images = data.images;
+    if (!images?.length) {
+      try {
+        const doc = await openPdf(att.content);
+        images = await renderPdfPages(doc);
+        void doc.destroy();
+      } catch { images = undefined; }
+    }
     cb.update(att.id, {
       extractedText: data.text,
-      pageImages: data.images,
+      pageImages: images?.length ? images : undefined,
       numPages,
       renderMode: numPages > PDF_VISION_PAGE_THRESHOLD ? 'text-only' : 'full',
       isExtracting: false,
     });
   } catch {
-    // No extraction backend (the public demo has none): extract the text
-    // layer in the browser with pdfjs instead. Summaries, digests and the
-    // text view all work; page images stay absent and the reader falls
-    // back to its text view.
+    // No extraction backend at all (the public demo has none): extract the
+    // text layer and render the pages in the browser instead. Summaries,
+    // digests, the text view and Recognize all keep working.
     try {
-      const [m, worker] = await Promise.all([
-        import('pdfjs-dist'),
-        import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-      ]);
-      m.GlobalWorkerOptions.workerSrc = worker.default;
-      const bytes = Uint8Array.from(atob(att.content), (c) => c.charCodeAt(0));
-      const doc = await m.getDocument({ data: bytes, verbosity: 0 }).promise;
+      const doc = await openPdf(att.content);
       const pages: string[] = [];
       for (let i = 1; i <= doc.numPages; i++) {
         try {
@@ -123,10 +220,14 @@ export async function processFile(file: File, cb: ProcessFileCallbacks): Promise
           pages.push(content.items.map((it) => ('str' in it ? it.str : '')).join(' '));
         } catch { pages.push(''); }
       }
+      let images: string[] | undefined;
+      try { images = await renderPdfPages(doc); } catch { images = undefined; }
+      void doc.destroy();
       cb.update(att.id, {
         extractedText: pages.join('\n\n').trim(),
+        pageImages: images?.length ? images : undefined,
         numPages: doc.numPages,
-        renderMode: 'text-only',
+        renderMode: doc.numPages > PDF_VISION_PAGE_THRESHOLD ? 'text-only' : 'full',
         isExtracting: false,
       });
     } catch {

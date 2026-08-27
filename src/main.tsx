@@ -5,8 +5,11 @@ import '@fontsource-variable/jetbrains-mono/index.css'
 import App from './App'
 import { bootProjects } from './store/projects'
 import { isViewerMode, bootViewer } from './lib/viewer'
+import { initAppearance } from './lib/appearance'
 import { installWheelGuard } from './lib/wheel-over-card'
 
+// Theme attributes land on <html> before first paint — no wrong-theme flash
+initAppearance()
 // Before React: leftover trackpad X is Chrome/Safari history swipe.
 // Must not wait on a child effect — the canvas is a full-page app.
 installWheelGuard()

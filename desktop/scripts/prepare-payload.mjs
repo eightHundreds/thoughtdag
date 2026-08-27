@@ -6,7 +6,7 @@
 // (a notarization hazard). So the payload gets a minimal package.json
 // holding exactly what server.mjs imports, and installs that.
 import { execSync } from 'node:child_process';
-import { cpSync, rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, rmSync, mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, readlinkSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -76,4 +76,24 @@ if (leftover) {
   console.error('native binaries slipped into the payload:\n' + leftover);
   process.exit(1);
 }
+
+// codesign --strict rejects any symlink that leaves the bundle. npm's
+// .bin shims are launchers the server never spawns — drop them — and
+// absolute or dangling links (npm sometimes writes absolute ones) would
+// point outside the .app, so they must not survive either. Plain fs
+// walking, because this also runs on the Windows builder.
+const pruneUnsafe = (dir) => {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const fp = path.join(dir, e.name);
+    if (e.isSymbolicLink()) {
+      let ok = !path.isAbsolute(readlinkSync(fp));
+      if (ok) { try { statSync(fp); } catch { ok = false; } }
+      if (!ok) { rmSync(fp); console.log('pruned unsafe symlink:', fp); }
+    } else if (e.isDirectory()) {
+      if (e.name === '.bin') rmSync(fp, { recursive: true, force: true });
+      else pruneUnsafe(fp);
+    }
+  }
+};
+pruneUnsafe(path.join(payload, 'node_modules'));
 console.log('payload ready:', payload);

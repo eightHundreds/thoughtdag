@@ -315,6 +315,7 @@ export async function directLlmStream(
     let pass: StreamPassResult | undefined;
     for (let step = 0; step < 5; step++) {
       const model = useOnline && step === 0 ? `${modelId}:online` : modelId;
+      if (step === 0 && useOnline) callbacks?.onGatewaySearch?.();
       try {
         pass = await streamOnePass(
           provider, model, messages, onText, onReasoning, citations, extraFor(step, true), signal);

@@ -83,7 +83,11 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
   const clipSource = useStore((s) => {
     if (!clipAnchor) return null;
     const src = s.nodes.find((n) => n.data.attachments?.some((a) => a.id === clipAnchor.attId));
-    if (!src) return null;
+    if (!src) {
+      // link-snapshot clips carry the link NODE's id (snapshots aren't attachments)
+      const link = s.nodes.find((n) => n.id === clipAnchor.attId && n.data.stepKind === 'link');
+      return link ? [link.id, link.data.linkTitle || link.data.linkUrl || ''].join(String.fromCharCode(0)) : null;
+    }
     const att = src.data.attachments!.find((a) => a.id === clipAnchor.attId)!;
     return `${src.id}\u0000${att.name}`;
   });
@@ -143,7 +147,7 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
 
   return (
     <div
-      className={`w-full h-full min-w-[340px] flex flex-col rounded-xl shadow-sm border-2 animate-fade-in transition-colors duration-200 ${
+      className={`content-card w-full h-full min-w-[340px] flex flex-col rounded-xl shadow-sm border-2 animate-fade-in transition-colors duration-200 ${
         kind === 'note' ? 'bg-amber-50/90 border-amber-200' : 'bg-card border-line'
       } ${selectedNodeId === id ? 'ring-2 ring-accent selected-glow' : ''}`}
       onClick={() => setSelectedNodeId(id)}
@@ -226,7 +230,7 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
               placeholder={t('content.notePlaceholder')}
               rows={5}
               autoFocus
-              className="w-full bg-transparent text-sm text-ink resize-y focus:outline-none placeholder-ink-faint leading-relaxed nopan nowheel"
+              className="w-full h-full min-h-[7rem] bg-transparent text-sm text-ink resize-none focus:outline-none placeholder-ink-faint leading-relaxed nopan nowheel"
             />
           ) : (
             <div

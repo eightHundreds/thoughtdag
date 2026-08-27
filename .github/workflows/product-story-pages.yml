@@ -42,7 +42,7 @@ jobs:
       - name: Add story site and SPA fallback
         run: |
           mkdir -p dist/story
-          cp -R marketing/story-site/. dist/story/
+          cp -R website/. dist/story/
           cp dist/index.html dist/404.html
 
       - name: Configure Pages

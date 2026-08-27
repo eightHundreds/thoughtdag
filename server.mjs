@@ -10,7 +10,14 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createDeepSeek } from '@ai-sdk/deepseek';
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mjs';
+// Inside Electron's utilityProcess pdfjs does not consider itself in Node
+// (process.versions.electron flips its environment check) and refuses to run
+// without a workerSrc. Point its fake worker at the real worker module so
+// text extraction works in the desktop app — silently broken there before.
+if (process.versions.electron) {
+  GlobalWorkerOptions.workerSrc = import.meta.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs');
+}
 import { execSync, execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -638,7 +645,9 @@ app.post('/api/fetch-url', async (req, res) => {
       .trim()
       .slice(0, 15_000);
 
-    res.json({ title, text, fetchedAt: new Date().toISOString() });
+    // html rides along for the client-side extraction pipeline + the
+    // reader's original view; `text` stays as the old-client fallback
+    res.json({ title, text, html, fetchedAt: new Date().toISOString() });
   } catch (err) {
     res.status(400).json({ error: err.message || 'Fetch failed' });
   }
@@ -930,6 +939,9 @@ app.post('/api/stream', async (req, res) => {
   // that would run two searches for one question). An explicit 'anysearch'
   // engine pref keeps the tool loop instead.
   const gatewayOnline = !ZHIPU_KEY && webSearch !== false && !!entry.online && searchEngine !== 'anysearch';
+  // The gateway searches without tool pings — the UI would show nothing.
+  // One frame up front lets it say "searching the web" and stamp the answer.
+  if (gatewayOnline) res.write(`data: ${JSON.stringify({ gatewaySearch: true })}\n\n`);
 
   const tools = makeTools(
     sources,
@@ -981,22 +993,33 @@ app.post('/api/stream', async (req, res) => {
           : undefined,
     });
 
-    // GLM occasionally leaks raw "<tool_call>...</tool_call>" markup into the
-    // text stream (e.g. when it wants to search but tools are disabled).
-    // Filter it out, holding back a possible partial tag at the chunk tail.
+    // Models occasionally leak raw tool-call markup into the text stream
+    // (e.g. when they want to search but tools are disabled). Two dialects
+    // observed: GLM's "<tool_call>...</tool_call>" and Kimi's
+    // "<|tool_calls_section_begin|>...<|tool_call_end|>" token family.
+    // Filter both, holding back a possible partial tag at the chunk tail.
     let holdback = '';
     const emitFiltered = (chunk) => {
       let buf = holdback + chunk;
       holdback = '';
-      buf = buf.replace(/<tool_call>[\s\S]*?<\/tool_call>\n?/g, '');
-      const open = buf.search(/<tool_call/);
+      buf = buf
+        .replace(/<tool_call>[\s\S]*?<\/tool_call>\n?/g, '')
+        // a section swallows the call blocks that have fully arrived
+        .replace(/<\|tool_calls_section_begin\|>(?:[\s\S]*?<\|tool_call_end\|>)+(?:<\|tool_calls_section_end\|>)?\n?/g, '')
+        // an orphan call block (its section was scrubbed in an earlier chunk)
+        .replace(/<\|tool_call_begin\|>[\s\S]*?<\|tool_call_end\|>\n?/g, '')
+        // stray single tokens — but never the two openers: unfinished
+        // blocks must stay intact in the holdback until their end arrives
+        .replace(/<\|tool_call(?!s_section_begin|_begin)[a-z_]*\|>/g, '');
+      const open = buf.search(/<tool_call|<\|tool_call/);
       if (open !== -1) {
         holdback = buf.slice(open);
         buf = buf.slice(0, open);
       } else {
-        // hold a tail that could be the start of "<tool_call>"
-        for (let k = Math.min(buf.length, 10); k > 0; k--) {
-          if ('<tool_call'.startsWith(buf.slice(-k))) {
+        // hold a tail that could be the start of either dialect's opener
+        for (let k = Math.min(buf.length, 12); k > 0; k--) {
+          const tail = buf.slice(-k);
+          if ('<tool_call'.startsWith(tail) || '<|tool_call'.startsWith(tail)) {
             holdback = buf.slice(-k);
             buf = buf.slice(0, -k);
             break;

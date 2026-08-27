@@ -35,11 +35,10 @@ LAUNCH.md
 launch-assets/
 video/public/bgm.mp3
 
-# local-only heavy media (marketing masters & audio stems)
+# local-only marketing workspace and heavy media
 video/archive/
 video/public/audio/
-marketing/media-kit/
-marketing/xhs/
+/marketing/
 
-# Context-operations benchmark (internal until reference gate passes)
-benchmark/
+# Context-operations benchmark: published (reference gate closed 2026-08-16,
+# report live). In-capture run dirs join as they complete.

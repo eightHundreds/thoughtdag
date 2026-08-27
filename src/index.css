@@ -27,7 +27,7 @@
   --color-line-strong: #D4CFC7;  /* emphasized borders             */
   --color-ink: #1A1A1A;          /* primary text                   */
   --color-ink-muted: #6B6560;    /* secondary text                 */
-  --color-ink-faint: #B8B2A8;    /* placeholders, hints            */
+  --color-ink-faint: #968C77;    /* placeholders, hints — calibrated ≥3:1 on card */
   --color-accent: #6B5CE7;       /* primary actions, continue edges */
   --color-accent-strong: #5A4BD6;/* accent hover                   */
   --color-warm: #E08A3C;         /* explore branches               */
@@ -37,6 +37,132 @@
 
 :root {
   color-scheme: light;
+  /* canvas texture (React Flow Background strokes) */
+  --canvas-dot: #E8E5E0;
+  --canvas-grid-fine: rgba(84, 100, 128, 0.10);
+  --canvas-grid-major: rgba(84, 100, 128, 0.22);
+}
+
+/* ── appearance: light × dark is a full token remap; paper × grid is a
+   canvas texture plus a component dialect. Set by lib/appearance.ts. ── */
+
+/* the drafting board runs a touch cooler than reading paper (light only) */
+:root[data-paper='grid']:not([data-theme='dark']) {
+  --color-surface: #F7F6F2;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  /* elevation is deliberate: cards sit a full step above the canvas
+     (1.22×, was 1.10× — they read as objects, not stains) */
+  --color-surface: #211E18;
+  --color-card: #322D25;
+  --color-wash: #3B352B;
+  --color-line: #4C4536;
+  --color-line-strong: #5E5645;
+  --color-ink: #EDE7DA;
+  --color-ink-muted: #B5AB97;
+  --color-ink-faint: #948A73;
+  --color-accent: #A79FF4;
+  --color-accent-strong: #B9B2F7;
+  --color-warm: #E3A45E;
+  --color-trace: #D9A83E;
+  --color-watch: #E0796F;
+  --canvas-dot: #423B2E;
+  --canvas-grid-fine: rgba(237, 231, 218, 0.05);
+  --canvas-grid-major: rgba(237, 231, 218, 0.11);
+  /* the tailwind semantic slices the UI actually uses, recomposed for dark
+     (utilities compile to var(--color-*), so this remaps them globally) */
+  --color-red-50: #3A2723;
+  --color-red-100: #47302A;
+  --color-red-200: #5C3B33;
+  --color-red-500: #E0796F;
+  --color-red-600: #E88A80;
+  --color-red-700: #F0A29A;
+  --color-green-50: #2A3A30;
+  --color-green-200: #3F5A48;
+  --color-green-600: #7FBF8E;
+  --color-green-700: #93CCA0;
+  --color-amber-50: #3B3220;
+  --color-amber-100: #4A3E26;
+  --color-amber-200: #5E4E2C;
+  --color-amber-400: #D9A83E;
+  --color-amber-500: #D9A83E;
+  --color-amber-600: #E2B558;
+  --color-amber-700: #EAC272;
+  --color-amber-800: #F2D18C;
+}
+
+/* code highlighting flips with the theme (github.css is light-only) */
+:root[data-theme='dark'] .hljs { color: #D4CEC2; background: transparent; }
+:root[data-theme='dark'] .hljs-comment, :root[data-theme='dark'] .hljs-quote { color: #8A8170; }
+:root[data-theme='dark'] .hljs-keyword, :root[data-theme='dark'] .hljs-selector-tag, :root[data-theme='dark'] .hljs-subst { color: #C9A1F0; }
+:root[data-theme='dark'] .hljs-string, :root[data-theme='dark'] .hljs-regexp, :root[data-theme='dark'] .hljs-addition { color: #9FD0A5; }
+:root[data-theme='dark'] .hljs-number, :root[data-theme='dark'] .hljs-literal { color: #E3A45E; }
+:root[data-theme='dark'] .hljs-title, :root[data-theme='dark'] .hljs-name { color: #A7C7F2; }
+:root[data-theme='dark'] .hljs-attr, :root[data-theme='dark'] .hljs-attribute, :root[data-theme='dark'] .hljs-variable, :root[data-theme='dark'] .hljs-template-variable { color: #E0B070; }
+:root[data-theme='dark'] .hljs-built_in, :root[data-theme='dark'] .hljs-type { color: #7FBFB2; }
+:root[data-theme='dark'] .hljs-deletion { color: #E0796F; }
+
+/* ── thought map: the structure-only share artifact. A self-contained
+   print design (its own light/dark), independent of the app theme —
+   the exported picture must look identical from any appearance. ── */
+.tmap-art { width: 460px; height: 575px; display: flex; flex-direction: column; position: relative;
+            font-family: 'Georgia', 'Songti SC', 'STSong', serif; --tmt: 1.15; --tms: 1; --tmx: 1;
+            --tm-mono: 'SF Mono', 'JetBrains Mono Variable', 'PingFang SC', monospace; }
+/* the graph is the ground layer, full bleed; text floats above it —
+   long titles run over the picture instead of being cut at a column */
+.tmap-art .tmap-graph { position: absolute; inset: 0; z-index: 0; }
+.tmap-art .tmap-head, .tmap-art .tmap-footrow { position: relative; z-index: 2; }
+.tmap-art.tmap-light { background: #F8F4EB; color: #1A1713;
+  --tm-ink: #1A1713; --tm-ink-min: #C9C1B1; --tm-mut: #6B6355; --tm-faint: #8A8272; --tm-red: #C73E2E; --tm-edge: rgba(26, 23, 19, .5); }
+.tmap-art.tmap-dark { background: #201D17; color: #EDE7DA;
+  --tm-ink: #EDE7DA; --tm-ink-min: #57503F; --tm-mut: #B5AB97; --tm-faint: #8F8570; --tm-red: #E06A50; --tm-edge: rgba(237, 231, 218, .42); }
+.tmap-art.tmap-scroll { flex-direction: row; }
+.tmap-art.tmap-scroll .tmap-head { width: 200px; padding: 26px 0 22px 24px; display: flex; flex-direction: column; height: 100%; }
+.tmap-art.tmap-cover .tmap-head { padding: 24px 26px 0; }
+.tmap-art .tmap-head { flex-shrink: 0; }
+.tmap-art .tmap-graph { flex: 1; min-height: 0; }
+.tmap-art .tmap-footrow { display: flex; justify-content: space-between; align-items: flex-end; padding: 0 26px 18px; flex-shrink: 0; margin-top: auto; }
+.tmap-art .tmap-k { font-family: var(--tm-mono); font-size: 11px; letter-spacing: .16em; color: var(--tm-faint); text-transform: uppercase; }
+.tmap-art .tmap-date { font-family: var(--tm-mono); font-size: calc(10.5px * var(--tmx)); letter-spacing: .08em; color: var(--tm-faint); margin-top: 5px; }
+.tmap-art .tmap-t { font-size: min(calc(34px * var(--tmt)), 48px); line-height: 1.22; font-weight: 600; margin-top: 10px; letter-spacing: .01em;
+                    display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.tmap-art.tmap-scroll .tmap-t { -webkit-line-clamp: 5; font-size: min(calc(28px * var(--tmt)), 40px); }
+.tmap-art.tmap-scroll .tmap-s { -webkit-line-clamp: 3; }
+.tmap-art.tmap-cover .tmap-t { -webkit-line-clamp: 2; }
+.tmap-art .tmap-s { font-size: min(calc(15px * var(--tms)), 20px); color: var(--tm-mut); margin-top: 9px; line-height: 1.55;
+                    display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; -webkit-line-clamp: 2; }
+.tmap-art .tmap-sig-byline { font-style: italic; font-size: min(calc(13px * var(--tms)), 17px); color: var(--tm-mut); margin-top: 9px; }
+.tmap-art .tmap-sig-corner { position: absolute; right: 20px; bottom: 16px; z-index: 2; font-style: italic; font-size: 13.5px; color: var(--tm-mut); }
+/* cover: the brand rides the kicker line at top right, a letterhead —
+   the bottom-right corner stays reserved for the signature */
+.tmap-art.tmap-cover .tmap-brand { position: absolute; top: 24px; right: 26px; z-index: 2; }
+.tmap-art .tmap-rule { width: 30px; height: 2.5px; background: var(--tm-ink); margin: 16px 0 13px; }
+.tmap-art .tmap-stats { font-size: calc(14px * var(--tmx)); color: var(--tm-mut); line-height: 2.0; }
+.tmap-art .tmap-stats b { color: var(--tm-ink); font-weight: 600; font-family: var(--tm-mono); font-size: calc(16px * var(--tmx)); margin-right: 2px; }
+.tmap-art .tmap-statline { font-size: calc(14px * var(--tmx)); color: var(--tm-mut); }
+.tmap-art .tmap-sg { display: inline-block; width: calc(9px * var(--tmx)); height: calc(9px * var(--tmx)); margin-right: 5px; vertical-align: calc(0.4px * var(--tmx)); }
+.tmap-art .tmap-sg-ink { fill: var(--tm-ink); }
+.tmap-art .tmap-sg-red { fill: var(--tm-red); }
+.tmap-art .tmap-sg-dia { fill: none; stroke: var(--tm-ink); stroke-width: 1.2; }
+.tmap-art .tmap-si { white-space: nowrap; }
+.tmap-art .tmap-statline b { color: var(--tm-ink); font-family: var(--tm-mono); font-size: calc(16px * var(--tmx)); font-weight: 600; }
+.tmap-art .tmap-spacer { flex: 1; }
+.tmap-art .tmap-brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.tmap-art .tmap-brand svg { width: auto; height: 21px; flex-shrink: 0; }
+.tmap-art .tmap-brand .tmap-bt { font-family: var(--tm-mono); font-size: 10px; letter-spacing: .06em; color: var(--tm-faint); line-height: 1.55; }
+.tmap-art .tmap-brand .tmap-bt b { color: var(--tm-mut); font-weight: 600; letter-spacing: .09em; font-size: 12px; }
+
+/* draft dialect: on the drafting board cards sit like components —
+   smaller radius, flat shadow. The layout laws are untouched. */
+:root[data-paper='grid'] .thought-node,
+:root[data-paper='grid'] .content-card {
+  border-radius: 7px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+:root[data-paper='grid'] .thought-node::before {
+  border-radius: 0;
 }
 
 html, body, #root {
@@ -296,6 +422,10 @@ textarea:focus-visible {
   margin-bottom: 0.75em;
 }
 
+/* Tailwind preflight strips list markers globally; restore them here */
+.markdown-body ul { list-style: disc; }
+.markdown-body ol { list-style: decimal; }
+
 .markdown-body li {
   margin-bottom: 0.25em;
 }
@@ -511,3 +641,47 @@ body.tdag-connecting, body.tdag-connecting * {
 [data-searching] .react-flow__node { opacity: 0.16; transition: opacity 0.2s ease; }
 [data-searching] .react-flow__node.search-hit { opacity: 1; }
 [data-searching] .react-flow__edges { opacity: 0.18; transition: opacity 0.2s ease; }
+
+/* "Continue last thread" hover beacon: a loud steady halo (same language as
+   condense-lit) plus a wide ripple. The shadow follows the element's own
+   shape: full card, folded plaque (26px pill), or the glyph seal. */
+@keyframes tdag-beacon {
+  0% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 55%, transparent), 0 0 34px color-mix(in srgb, var(--color-accent) 45%, transparent); }
+  70% { box-shadow: 0 0 0 46px color-mix(in srgb, var(--color-accent) 0%, transparent), 0 0 34px color-mix(in srgb, var(--color-accent) 45%, transparent); }
+  100% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 55%, transparent), 0 0 34px color-mix(in srgb, var(--color-accent) 45%, transparent); }
+}
+.thought-node.beacon-node { animation: tdag-beacon 1.3s ease-out infinite; }
+/* Glyph tier keeps the work-tier box; the halo sits on that box, not a
+   counter-scaled pin. Inner seal must not run a second ripple. */
+
+/* ── Context Focus ─────────────────────────────────────────────────────
+   Single selection lights the node's REAL context (same partition the
+   prompt builder uses); everything else dims gently. Read-only. */
+.react-flow__node.focus-dim { opacity: 0.30; }
+.react-flow__node.focus-dim, .react-flow__node.focus-ctx,
+.react-flow__node.focus-target, .react-flow__node.focus-down { transition: opacity 0.25s ease; }
+.react-flow__node.focus-down .thought-node,
+.react-flow__node.focus-down .content-card { border-style: dashed; }
+/* the searchlight owns the stage while active */
+[data-searching] .react-flow__node.focus-dim { opacity: 0.16; }
+
+/* lit edges keep their SCREEN width when zoomed out: divide by the zoom
+   (clamped) so the feed line never thins into invisibility on the map */
+.react-flow__edge.focus-e-path .react-flow__edge-path {
+  stroke-width: calc(3.5px / clamp(0.15, var(--tdag-zoom, 1), 1)) !important;
+}
+.react-flow__edge.focus-e-down .react-flow__edge-path {
+  stroke-width: calc(2.5px / clamp(0.3, var(--tdag-zoom, 1), 1)) !important;
+}
+
+/* feed-line flow: bright dots gliding inside the solid accent stroke */
+.tdag-flow-ov {
+  stroke: #fff; stroke-linecap: round; opacity: 0.9; pointer-events: none;
+  stroke-width: calc(1.6px / clamp(0.15, var(--tdag-zoom, 1), 1));
+  stroke-dasharray: calc(5px / clamp(0.15, var(--tdag-zoom, 1), 1)) calc(26px / clamp(0.15, var(--tdag-zoom, 1), 1));
+  animation: tdag-flow 1.1s linear infinite;
+}
+@keyframes tdag-flow { to { stroke-dashoffset: calc(-31px / clamp(0.15, var(--tdag-zoom, 1), 1)); } }
+@media (prefers-reduced-motion: reduce) {
+  .tdag-flow-ov { animation: none; display: none; }
+}
