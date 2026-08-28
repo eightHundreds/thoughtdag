@@ -882,25 +882,19 @@ app.post('/api/runtime-key', async (req, res) => {
 
 // Non-streaming endpoint (background summaries)
 app.post('/api/claude', async (req, res) => {
-  const { messages, model: modelId, images, providers, thinking } = req.body;
+  const { messages, model: modelId, images, providers } = req.body;
   const resolved = resolveModel(modelId || DEFAULT_MODEL, images && images.length > 0, providers);
   if (!resolved) { res.status(503).json({ error: 'No model configured. Add an API key first.' }); return; }
   const { entry, id: actualModelId } = resolved;
 
   try {
     const prompt = toSdkPrompt(messages, images);
-    const providerOptions = thinking === false
-      ? {
-          openrouter: { reasoning: { enabled: false } },
-          zhipu: { thinking: { type: 'disabled' } },
-        }
-      : entry.providerOptions;
     const { text, usage } = await generateText({
       maxOutputTokens: MAX_OUTPUT_TOKENS,
       model: entry.model(),
       system: prompt.system,
       messages: prompt.messages,
-      providerOptions,
+      providerOptions: entry.providerOptions,
     });
     res.json({ text, usage, model: actualModelId });
   } catch (err) {

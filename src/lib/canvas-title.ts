@@ -60,18 +60,13 @@ export async function generateCanvasTitle(nodes: ThoughtNode[], lang: 'zh' | 'en
   }
   const body = formatTitleSource(rows);
   const { llmCall } = await import('./api');
-  const raw = await llmCall(
-    [
-      {
-        role: 'user',
-        content:
-          `These are the turns of a thinking canvas. Each numbered item is a node: its question (or material name), and its takeaway (摘要) when one exists.\n\n${body}\n\nWrite ONE short title for this canvas, as a researcher would name a notebook: the subject, and where the thinking landed if that is already clear. Hard limit: 20 characters for CJK languages, 48 characters otherwise. Write in ${lang === 'zh' ? 'Chinese' : 'English'} (the reader's interface language), even if the nodes mix languages. Never use dash characters (—, –, -). No quotes, no numbering, no preamble. Output only the title.`,
-      },
-    ],
-    undefined,
-    undefined,
-    { thinking: false },
-  );
+  const raw = await llmCall([
+    {
+      role: 'user',
+      content:
+        `These are the turns of a thinking canvas. Each numbered item is a node: its question (or material name), and its takeaway (摘要) when one exists.\n\n${body}\n\nWrite ONE short title for this canvas, as a researcher would name a notebook: the subject, and where the thinking landed if that is already clear. Hard limit: 20 characters for CJK languages, 48 characters otherwise. Write in ${lang === 'zh' ? 'Chinese' : 'English'} (the reader's interface language), even if the nodes mix languages. Never use dash characters (—, –, -). No quotes, no numbering, no preamble. Output only the title.`,
+    },
+  ]);
   const title = sanitizeCanvasTitle(raw);
   if (!title) {
     const err = new Error('empty-output');

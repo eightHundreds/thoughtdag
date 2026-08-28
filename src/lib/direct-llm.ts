@@ -404,23 +404,12 @@ export async function directLlmStream(
   }
 }
 
-/** Extra body fields that ask OpenAI-compatible gateways not to think.
-    Unknown keys are ignored; known ones turn off GLM/Qwen/Kimi/OR. */
-export function noThinkingFields(): Record<string, unknown> {
-  return {
-    reasoning: { enabled: false },
-    thinking: { type: 'disabled' },
-    enable_thinking: false,
-  };
-}
-
 /** Non-streaming call straight to the gateway (background summaries etc.). */
 export async function directLlmCall(
   provider: RuntimeProvider,
   modelId: string,
   contextMessages: ContextMessage[],
   images?: ImageAttachment[],
-  opts?: { thinking?: boolean },
 ): Promise<string> {
   try {
     const res = await fetch(`${provider.baseURL.replace(/\/$/, '')}/chat/completions`, {
@@ -429,7 +418,6 @@ export async function directLlmCall(
       body: JSON.stringify({
         model: modelId,
         messages: toOpenAiMessages(contextMessages, images),
-        ...(opts?.thinking === false ? noThinkingFields() : {}),
       }),
     });
     if (!res.ok) {

@@ -117,19 +117,14 @@ async function guardDirectVision(modelId: string | undefined, images?: ImageAtta
   if (info && !info.vision) throw new Error(t('error.textOnlyModelImages'));
 }
 
-export interface LlmCallOpts {
-  /** When false, ask the gateway not to emit a thinking/reasoning pass. */
-  thinking?: boolean;
-}
-
 // Non-streaming call (used for background summaries)
-export async function llmCall(contextMessages: ContextMessage[], images?: ImageAttachment[], modelOverride?: string, opts?: LlmCallOpts): Promise<string> {
+export async function llmCall(contextMessages: ContextMessage[], images?: ImageAttachment[], modelOverride?: string): Promise<string> {
   const modelId = modelOverride || useUiStore.getState().selectedModel || undefined;
   images = await imagesForModel(modelId, images);
   const direct = directProvider(modelId);
   if (direct && modelId) {
     await guardDirectVision(modelId, images);
-    return directLlmCall(direct, modelId, contextMessages, images, opts);
+    return directLlmCall(direct, modelId, contextMessages, images);
   }
   if (isHostedProxy()) throw new Error(t('error.noDirectProvider'));
   try {
@@ -143,7 +138,6 @@ export async function llmCall(contextMessages: ContextMessage[], images?: ImageA
         // browser-configured providers ride along on EVERY request — the
         // proxy builds a per-request registry and forgets it (stateless)
         providers: statelessProviders(),
-        ...(opts?.thinking === false ? { thinking: false } : {}),
       }),
     });
 
