@@ -405,11 +405,10 @@ export async function directLlmStream(
 }
 
 /** Extra body fields that ask OpenAI-compatible gateways not to think.
-    Unknown keys are ignored; known ones turn off GLM/Qwen/Kimi/Grok/OR. */
+    Unknown keys are ignored; known ones turn off GLM/Qwen/Kimi/OR. */
 export function noThinkingFields(): Record<string, unknown> {
   return {
-    reasoning: { enabled: false, effort: 'none' },
-    reasoning_effort: 'none',
+    reasoning: { enabled: false },
     thinking: { type: 'disabled' },
     enable_thinking: false,
   };

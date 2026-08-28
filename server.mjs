@@ -891,8 +891,7 @@ app.post('/api/claude', async (req, res) => {
     const prompt = toSdkPrompt(messages, images);
     const providerOptions = thinking === false
       ? {
-          openrouter: { reasoning: { enabled: false, effort: 'none' } },
-          openai: { reasoningEffort: 'none' },
+          openrouter: { reasoning: { enabled: false } },
           zhipu: { thinking: { type: 'disabled' } },
         }
       : entry.providerOptions;
