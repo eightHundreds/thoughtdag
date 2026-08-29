@@ -13,6 +13,9 @@ import { Markdown } from './Markdown';
 import { countTokens } from '../utils';
 import { useT, fmt } from '../i18n';
 import { isViewerMode } from '../lib/viewer';
+import { useViewportMode } from '../lib/use-viewport-mode';
+import { plaqueDragClass, usePlaqueTap } from '../lib/use-plaque-tap';
+import { toastMaterialDesktopHint } from '../lib/compact-ui';
 
 // Content nodes: canvas material, not turns. A note (markdown), a file
 // (attachments) or a link (stamped web snapshot) that never generates — it
@@ -32,6 +35,15 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
   // Wiring material happens mostly from the overview — grow the handle there
   const zoomTier = useZoomTier();
   const zoomedOut = zoomTier !== 'work';
+  const { blockReader, gestures } = useViewportMode();
+  const nodesDraggable = gestures.nodesDraggable;
+  const dragClass = plaqueDragClass(nodesDraggable);
+  const kind = data.stepKind === 'file' ? 'file' : data.stepKind === 'link' ? 'link' : 'note';
+  const onContentTap = () => {
+    setSelectedNodeId(id);
+    if (blockReader && (kind === 'file' || kind === 'link')) toastMaterialDesktopHint();
+  };
+  const plaqueTap = usePlaqueTap(onContentTap, !nodesDraggable);
   const rf = useReactFlow();
   const nodePos = useStore((s) => { const n = s.nodes.find((x) => x.id === id); return n ? n.position : null; });
   // Does this material actually reach any context? 'none' and 'quote' are
@@ -54,7 +66,6 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
     return () => cancelAnimationFrame(frame);
   }, [zoomTier, zoomedOut, occupyH, glyphTier, id, updateNodeInternals]);
 
-  const kind = data.stepKind === 'file' ? 'file' : data.stepKind === 'link' ? 'link' : 'note';
   const [editing, setEditing] = useState(!isViewerMode && kind === 'note' && !data.question);
   const [draft, setDraft] = useState(data.question);
   const [openExtract, setOpenExtract] = useState<string | null>(null); // attId whose extraction panel is open
@@ -95,6 +106,7 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
   const openClipSource = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!clipAnchor || !clipSourceId) return;
+    if (blockReader) { toastMaterialDesktopHint(); return; }
     useUiStore.getState().setReaderNodeId(clipSourceId, { page: clipAnchor.page });
   };
   const linkDomain = (() => { try { return new URL(data.linkUrl ?? '').hostname; } catch { return data.linkUrl ?? ''; } })();
@@ -110,13 +122,17 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
     // never collide when the icon counter-scales.
     return (
       <div
-        className={`thought-node map-node glyph-node drag-handle cursor-grab active:cursor-grabbing w-full min-w-[340px] flex items-center justify-center rounded-xl border-2 ${
-          kind === 'note' ? 'bg-amber-50/90 border-amber-200' : 'bg-card border-line'
-        } ${selectedNodeId === id ? 'ring-2 ring-accent selected-glow glyph-selected' : ''}`}
+        className={`thought-node map-node glyph-node w-full min-w-[340px] flex items-center justify-center rounded-xl border-2 ${
+          dragClass
+        }${kind === 'note' ? 'bg-amber-50/90 border-amber-200' : 'bg-card border-line'} ${selectedNodeId === id ? 'ring-2 ring-accent selected-glow glyph-selected' : ''}`}
         style={{ minHeight: occupyH || undefined, height: occupyH || undefined }}
-        onClick={() => setSelectedNodeId(id)} data-glyph-node
+        onClick={() => { if (nodesDraggable) setSelectedNodeId(id); }} data-glyph-node
+        onPointerDown={plaqueTap.onPointerDown}
+        onPointerUp={plaqueTap.onPointerUp}
+        onPointerCancel={plaqueTap.onPointerCancel}
         onDoubleClick={(e) => {
           e.stopPropagation();
+          if (!nodesDraggable) return;
           // documents open where they are read; notes zoom to working scale
           if (kind === 'file' || kind === 'link') useUiStore.getState().setReaderNodeId(id);
           else rf.setCenter((nodePos?.x ?? 0) + 200, (nodePos?.y ?? 0) + 120, { zoom: 1, duration: 300 });
@@ -150,8 +166,12 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
       className={`content-card w-full h-full min-w-[340px] flex flex-col rounded-xl shadow-sm border-2 animate-fade-in transition-colors duration-200 ${
         kind === 'note' ? 'bg-amber-50/90 border-amber-200' : 'bg-card border-line'
       } ${selectedNodeId === id ? 'ring-2 ring-accent selected-glow' : ''}`}
-      onClick={() => setSelectedNodeId(id)}
+      onClick={() => { if (nodesDraggable) setSelectedNodeId(id); }}
+      onPointerDown={plaqueTap.onPointerDown}
+      onPointerUp={plaqueTap.onPointerUp}
+      onPointerCancel={plaqueTap.onPointerCancel}
       onDoubleClick={() => {
+        if (!nodesDraggable) return;
         // notes keep dblclick=edit (on the body); files and links open the reader
         if (kind !== 'note') useUiStore.getState().setReaderNodeId(id);
       }}
@@ -166,7 +186,7 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
       {/* Pure source: material feeds context, nothing flows INTO it — hence no target handle. */}
 
       {/* header: drag handle + identity + linked state + delete */}
-      <div className={`flex items-center justify-between px-4 py-2 border-b cursor-grab active:cursor-grabbing drag-handle shrink-0 ${kind === 'note' ? 'border-amber-200/70' : 'border-line/70'}`}>
+      <div className={`flex items-center justify-between px-4 py-2 border-b shrink-0 ${dragClass}${kind === 'note' ? 'border-amber-200/70' : 'border-line/70'}`}>
         <div className="flex items-center gap-2 min-w-0">
           {headerIcon}
           {kind === 'link'
@@ -190,7 +210,11 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
-            onClick={(e) => { e.stopPropagation(); useUiStore.getState().setReaderNodeId(id); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (blockReader) { toastMaterialDesktopHint(); return; }
+              useUiStore.getState().setReaderNodeId(id);
+            }}
             title={t('reader.open')}
             className="text-ink-faint hover:text-accent rounded-full w-6 h-6 flex items-center justify-center transition-colors"
           >

@@ -9,6 +9,7 @@ import SearchToggles from '../ui/SearchToggles';
 import type { Attachment } from '../../types';
 import { countTokens } from '../../utils';
 import { useT, fmt } from '../../i18n';
+import { useViewportMode } from '../../lib/use-viewport-mode';
 import MentionSurface from '../ui/NodeMention';
 import { useMentions } from '../../lib/mentions';
 
@@ -32,6 +33,7 @@ export default function FollowUpInput({
   const nodes = useStore((s) => s.nodes);
   const edges = useStore((s) => s.edges);
   const t = useT();
+  const { coarse } = useViewportMode();
 
   // Draft survives node switches (the component remounts per node) and
   // panel close/reopen; cleared on submit.
@@ -88,13 +90,13 @@ export default function FollowUpInput({
   useEffect(() => {
     const t = setTimeout(() => {
       if (continueRef.current) {
-        continueRef.current.focus();
+        if (!coarse) continueRef.current.focus();
         autoGrow(continueRef.current); // restored drafts need their height back
       }
     }, 100);
     return () => clearTimeout(t);
      
-  }, [nodeId, branchContext]);
+  }, [nodeId, branchContext, coarse]);
 
   const submit = () => {
     if (!continueInput.trim()) return;

@@ -17,6 +17,11 @@ export function isContentKind(kind?: ThoughtData['stepKind']): boolean {
   return kind === 'note' || kind === 'file' || kind === 'link';
 }
 
+/** Q&A / paradigm cards — not notes, files, links, or frames. */
+export function isThoughtCard(kind?: ThoughtData['stepKind']): boolean {
+  return !isContentKind(kind) && kind !== 'frame';
+}
+
 export function buildContentNode(
   kind: 'note' | 'file' | 'link',
   position: { x: number; y: number },

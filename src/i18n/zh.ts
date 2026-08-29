@@ -33,6 +33,8 @@ export const zh: Record<keyof typeof en, string> = {
   'toolbar.advancedToggle': '范式（高级功能）',
   'toolbar.advancedTitle': '开启后，首页与画布切换菜单中出现范式入口：可复用的人机协作工作流',
   'landing.loadExample': '载入示例画布',
+  'compact.materialDesktopHint': '请在电脑上打开阅读器看原件',
+  'compact.docStart': '打开 PDF 或文档',
   'landing.howItWorks': '如何使用',
   'landing.feature1.title': '随处分支',
   'landing.feature1.desc': '选中回答中的任意一段文字，从那里岔出一条新的思路。',

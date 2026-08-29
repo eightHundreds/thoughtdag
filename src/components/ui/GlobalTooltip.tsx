@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useViewportMode } from '../../lib/use-viewport-mode';
 
 // Global fast tooltips: the browser's native title delay (~1s) is fixed and
 // sluggish. This layer watches every [title] in the app, shows a styled tip
@@ -20,8 +21,10 @@ interface Tip {
 
 export default function GlobalTooltip() {
   const [tip, setTip] = useState<Tip | null>(null);
+  const { coarse } = useViewportMode();
 
   useEffect(() => {
+    if (coarse) return;
     let timer = 0;
     let current: HTMLElement | null = null;
 
@@ -86,7 +89,7 @@ export default function GlobalTooltip() {
       document.removeEventListener('scroll', down, true);
       window.removeEventListener('blur', down);
     };
-  }, []);
+  }, [coarse]);
 
   if (!tip) return null;
   return <TipBox tip={tip} />;

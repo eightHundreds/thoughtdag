@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { AlertTriangle, ChevronLeft, ChevronRight, Copy, GitBranch, Maximize2, RefreshCw, Star, Trash2, Pencil } from 'lucide-react';
 import { useStore } from '../../store';
 import { useUiStore } from '../../lib/ui-store';
@@ -7,6 +7,8 @@ import { copyText } from '../../lib/export';
 import { Markdown, HighlightedMarkdown } from '../Markdown';
 import { useT } from '../../i18n';
 import { isViewerMode } from '../../lib/viewer';
+import { useViewportMode } from '../../lib/use-viewport-mode';
+import { useTextSelection } from '../../lib/use-text-selection';
 import { collectExploreMarksKey, type ExploreMark } from '../../lib/explore-marks';
 import ReasoningDisclosure from '../ui/ReasoningDisclosure';
 import type { ThoughtData } from '../../types';
@@ -41,6 +43,7 @@ export default function ResponseSection({
   const exploreMarksKey = useStore((s) => collectExploreMarksKey(nodeId, s.nodes, s.edges));
   const exploreMarks = useMemo(() => JSON.parse(exploreMarksKey) as ExploreMark[], [exploreMarksKey]);
   const t = useT();
+  const { sheet } = useViewportMode();
   const exploreSpecs = exploreMarks.map((m) => ({
     text: m.text,
     nodeId: m.nodeId,
@@ -58,10 +61,11 @@ export default function ResponseSection({
   };
 
   const [editResponseValue, setEditResponseValue] = useState('');
-  const [selectedText, setSelectedText] = useState('');
-  const [selectionPos, setSelectionPos] = useState<{ x: number; y: number } | null>(null);
   const responseRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<HTMLDivElement>(null);
+  const selection = useTextSelection(responseRef, !isViewerMode);
+  const selectedText = selection.text;
+  const selectionPos = selection.pos;
 
   // Follow the stream — but only while the reader is at the bottom. Scroll
   // up during generation and the view stays put (read from the top while
@@ -73,39 +77,6 @@ export default function ResponseSection({
       el.scrollTop = el.scrollHeight;
     }
   }, [data.isLoading, data.response, data.reasoning]);
-
-  // Text selection handler
-  const handleTextSelection = useCallback((e: MouseEvent) => {
-    // Don't clear selection if clicking inside an input/textarea (branch input, etc.)
-    const target = e.target as HTMLElement;
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') {
-      return;
-    }
-
-    const selection = window.getSelection();
-    if (selection && selection.toString().trim().length > 0 && responseRef.current?.contains(selection.anchorNode)) {
-      const text = selection.toString().trim();
-      setSelectedText(text);
-      const range = selection.getRangeAt(0);
-      const rangeRect = range.getBoundingClientRect();
-      const panelRect = responseRef.current?.getBoundingClientRect();
-      if (panelRect) {
-        setSelectionPos({
-          x: rangeRect.left + rangeRect.width / 2 - panelRect.left,
-          y: rangeRect.top - panelRect.top - 48,
-        });
-      }
-    } else {
-      setSelectedText('');
-      setSelectionPos(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isViewerMode) return; // selection menu stages writes
-    document.addEventListener('mouseup', handleTextSelection);
-    return () => document.removeEventListener('mouseup', handleTextSelection);
-  }, [handleTextSelection]);
 
   // Button-triggered (see ThoughtNode): double-click stays a text gesture.
   const startEditResponse = () => {
@@ -125,16 +96,12 @@ export default function ResponseSection({
   const handleHighlight = () => {
     if (!selectedText) return;
     addHighlight(nodeId, { id: generateId(), text: selectedText });
-    setSelectedText('');
-    setSelectionPos(null);
-    window.getSelection()?.removeAllRanges();
+    selection.clear();
   };
 
   const handleBranchFromSelection = () => {
     onExploreSelection(selectedText); // save before selection clears
-    setSelectedText('');
-    setSelectionPos(null);
-    window.getSelection()?.removeAllRanges();
+    selection.clear();
   };
 
   // No response yet and nothing in flight (e.g. a fresh ask node or a
@@ -149,9 +116,9 @@ export default function ResponseSection({
         <label className="text-2xs font-semibold text-green-600">{t('panel.response')}</label>
         {(data.response || data.isLoading) && (
           <button
-            onClick={() => useUiStore.getState().setResponseViewerNodeId(nodeId)}
+            onClick={() => { if (!sheet) useUiStore.getState().setResponseViewerNodeId(nodeId); }}
             title={t('panel.expandResponse')}
-            className="text-ink-faint hover:text-accent w-6 h-6 rounded-md hover:bg-wash flex items-center justify-center transition-colors"
+            className={`text-ink-faint hover:text-accent w-6 h-6 rounded-md hover:bg-wash flex items-center justify-center transition-colors ${sheet ? 'hidden' : ''}`}
             data-response-expand
           >
             <Maximize2 size={13} strokeWidth={1.75} />
@@ -173,7 +140,7 @@ export default function ResponseSection({
         </div>
         )
       ) : data.isLoading && data.response && !data.restreaming ? (
-        <div ref={streamRef} className="markdown-body text-sm text-ink leading-relaxed max-h-[500px] overflow-y-auto py-1">
+        <div ref={streamRef} className={`markdown-body text-sm text-ink leading-relaxed py-1 ${sheet ? '' : 'max-h-[500px] overflow-y-auto'}`}>
           <Markdown>{data.response}</Markdown>
           <span className="inline-block w-2 h-4 bg-accent animate-pulse rounded-sm ml-0.5 align-text-bottom" />
         </div>
@@ -205,8 +172,25 @@ export default function ResponseSection({
             )}
           </div>
 
+          {/* Sheet: fixed action bar (iOS callout sits on the selection). */}
+          {sheet && selectedText && (
+            <div className="sticky bottom-0 mt-2 flex gap-1 bg-card border border-line rounded-xl shadow-lg p-1 z-10">
+              <button
+                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); handleBranchFromSelection(); }}
+                className="bg-accent hover:bg-accent-strong text-white text-xs px-3 py-2 rounded-lg transition-all whitespace-nowrap"
+              >
+                <GitBranch size={14} strokeWidth={1.75} className="inline" /> {t('common.explore')}
+              </button>
+              <button
+                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); handleHighlight(); }}
+                className="bg-amber-500 hover:bg-amber-400 text-white text-xs px-3 py-2 rounded-lg transition-all whitespace-nowrap"
+              >
+                <Star size={14} strokeWidth={1.75} className="inline" /> {t('common.highlight')}
+              </button>
+            </div>
+          )}
           {/* Floating toolbar for text selection */}
-          {selectedText && selectionPos && (
+          {!sheet && selectedText && selectionPos && (
             <div
               style={{
                 position: 'absolute',

@@ -2,6 +2,8 @@ import { useUiStore } from './ui-store';
 import { useStore } from '../store';
 import { PANEL_INSET } from './constants';
 import type { ThoughtData } from '../types';
+import { isThoughtCard } from './content';
+import { getViewportMode } from './use-viewport-mode';
 
 /** Horizontal screen-pixel shift that recenters a node in the strip of
     canvas the focus panel leaves visible — without it, "center on node"
@@ -12,7 +14,8 @@ import type { ThoughtData } from '../types';
 export function panelShift(nodeId: string): number {
   const ui = useUiStore.getState();
   if (!ui.panelOpen) return 0;
+  if (getViewportMode().sheet) return 0;
   const kind = (useStore.getState().nodes.find((n) => n.id === nodeId)?.data as ThoughtData | undefined)?.stepKind;
-  if (kind === 'note' || kind === 'file' || kind === 'link' || kind === 'frame') return 0;
+  if (!isThoughtCard(kind)) return 0;
   return ui.panelWidth + PANEL_INSET + 12;
 }

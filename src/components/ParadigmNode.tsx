@@ -5,6 +5,8 @@ import { useStore } from '../store';
 import { effectiveRoles } from '../lib/role-templates';
 import { useUiStore } from '../lib/ui-store';
 import { useI18n, useT } from '../i18n';
+import { useViewportMode } from '../lib/use-viewport-mode';
+import { plaqueDragClass } from '../lib/use-plaque-tap';
 
 // Orchestration-view card. A paradigm has exactly two node kinds:
 //   human  — a dialogue turn: the human asks here. The card holds optional
@@ -36,6 +38,8 @@ export default function ParadigmNode({ id, data }: NodeProps<ThoughtNodeType>) {
     }));
   };
   const kind: 'human' | 'prompt' = data.stepKind === 'human' ? 'human' : 'prompt';
+  const { gestures } = useViewportMode();
+  const dragClass = plaqueDragClass(gestures.nodesDraggable);
 
   return (
     <div className={`bg-card border-2 border-dashed rounded-xl w-[440px] shadow-sm ${KIND_STYLES[kind]}`}>
@@ -45,7 +49,7 @@ export default function ParadigmNode({ id, data }: NodeProps<ThoughtNodeType>) {
       <Handle type="source" position={Position.Right} id="branch" isConnectable={false} className="!bg-transparent !w-0 !h-0 !border-0 !pointer-events-none" style={{ top: '50%' }} />
 
       {/* header: drag handle + kind switcher + delete */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-line/60 cursor-grab active:cursor-grabbing drag-handle">
+      <div className={`flex items-center justify-between px-4 py-2 border-b border-line/60 ${dragClass}`}>
         <div className="flex gap-1">
           {KINDS.map(({ kind: k, icon: Icon, labelKey }) => (
             <button

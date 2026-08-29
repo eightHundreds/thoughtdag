@@ -91,7 +91,7 @@ export default function SearchBar({
   };
 
   return (
-    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 w-[460px]" data-canvas-search>
+    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 w-[min(460px,92vw)]" data-canvas-search>
       <div className="bg-card border border-line rounded-xl shadow-xl overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-2.5 transition-shadow focus-within:ring-1 focus-within:ring-accent/40">
           <Search size={15} strokeWidth={1.75} className="text-ink-faint shrink-0" />

@@ -38,7 +38,7 @@ import { useProjects, adoptImportedProject, markInstantiatedFrom } from './store
 import { projectStorageKey } from './store/projects';
 import { set as idbSet } from 'idb-keyval';
 import { instantiateParadigm } from './lib/paradigm';
-import { isContentKind, spawnContentNode, ingestFiles, fetchLinkIntoNode, clipboardTextToMarkdown } from './lib/content';
+import { isContentKind, isThoughtCard, spawnContentNode, ingestFiles, fetchLinkIntoNode, clipboardTextToMarkdown } from './lib/content';
 import { generateId, isImeComposing } from './utils';
 import { recapToNote, recapCamera } from './lib/recap';
 import type { Attachment, ThoughtNode as ThoughtNodeType, ThoughtEdge } from './types';
@@ -52,6 +52,11 @@ import { COLORS, FRAME_COLORS, PANEL_INSET } from './lib/constants';
 import { lockWorkWrapper, unlockWorkWrapper } from './lib/layout';
 
 import { panelShift } from './lib/panel-shift';
+import { ViewportModeProvider, useViewportMode, getViewportMode } from './lib/use-viewport-mode';
+import { landCompactCamera, type CameraFlow } from './lib/camera';
+import { GLYPH_ENTER, MAP_LANDING_ZOOM } from './lib/map-tier';
+import { toolbarRightPx } from './lib/viewport-mode';
+import { toastMaterialDesktopHint } from './lib/compact-ui';
 import { migrateActiveCanvasToVault, gcVaultAtBoot } from './lib/attachment-vault-boot';
 import { consumeOpenRouterCallback, handMintedKeyToModal, startOpenRouterOAuth } from './lib/openrouter-oauth';
 import { bootDesktopUpdateUI } from './lib/desktop-update-ui';
@@ -80,6 +85,12 @@ import { TimelineBar } from './components/ui/TimelineBar';
 import TimelineOverviewModal from './components/ui/TimelineOverviewModal';
 import { useStore as useRfStore, useReactFlow } from '@xyflow/react';
 
+function refitCanvas(rf: CameraFlow | null, duration = 400, padding = 0.15) {
+  if (!rf) return;
+  if (getViewportMode().sheet) void landCompactCamera(rf, useStore.getState().nodes);
+  else void rf.fitView({ duration, padding });
+}
+
 // One node type key, three renderers: content nodes (notes / files) render
 // the same in every mode; otherwise the active project's kind decides
 // whether a node is a conversation card or an orchestration step card.
@@ -92,11 +103,6 @@ function NodeDispatch(props: Parameters<typeof ThoughtNode>[0]) {
 const nodeTypes = { thought: NodeDispatch };
 // Overrides the built-in smoothstep so persisted edges need no migration
 const edgeTypes = { smoothstep: ThoughtEdgeView };
-
-// Two-finger trackpad swipe is a wheel event. On Mac we pan with it and
-// keep pinch-to-zoom (Safari/Chrome set ctrlKey on pinch). Other platforms
-// keep the mouse-wheel zoom default.
-const isMacTrackpad = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
 // Gate on rehydration: the store loads asynchronously from IndexedDB, and
 // mounting the canvas only after hydration lets ReactFlow's fitView see the
@@ -139,7 +145,10 @@ export default function App() {
     if (!hydrated || isViewerMode) return;
     if (localStorage.getItem('thoughtdag.tutorialDone')) return;
     if (useStore.getState().nodes.length > 0) return;
-    const timer = setTimeout(() => useUiStore.getState().setTutorialOpen(true), 900);
+    const timer = setTimeout(() => {
+      if (getViewportMode().narrowChrome) return;
+      useUiStore.getState().setTutorialOpen(true);
+    }, 900);
     return () => clearTimeout(timer);
   }, [hydrated]);
 
@@ -162,7 +171,7 @@ export default function App() {
     });
   }, []);
   return (
-    <>
+    <ViewportModeProvider>
       {hydrated && <Canvas />}
       <Toaster />
       <GlobalTooltip />
@@ -175,13 +184,15 @@ export default function App() {
       <BackupDialog />
       <ConfirmDialog />
       <Tutorial />
-    </>
+    </ViewportModeProvider>
   );
 }
 
 function Canvas() {
   const { nodes, edges, setNodes, setEdges, addQuestion, undo, redo, addCrossLink, setSelectedNodeId, setSelectedNodeIds, history, historyIndex, relayout } = useStore();
   const t = useT();
+  const vp = useViewportMode();
+  const { sheet, narrowChrome, blockReader, coarse, gestures } = vp;
   const setTutorialOpen = useUiStore((s) => s.setTutorialOpen);
   const annotationsHidden = useUiStore((s) => s.annotationsHidden);
   const setAnnotationsHidden = useUiStore((s) => s.setAnnotationsHidden);
@@ -225,13 +236,28 @@ function Canvas() {
   const centerNode = useCallback((n: { id: string; position: { x: number; y: number } }, opts: { zoom?: number; duration?: number; offX?: number } = {}) => {
     const rf = rfInstance.current;
     if (!rf) return;
-    const zoom = opts.zoom ?? rf.getZoom();
+    const mode = getViewportMode();
+    let zoom = opts.zoom ?? rf.getZoom();
+    if (mode.sheet) {
+      const current = rf.getZoom();
+      zoom = current <= GLYPH_ENTER ? MAP_LANDING_ZOOM : current;
+    }
     rf.setCenter(
       n.position.x + (opts.offX ?? 260) + panelShift(n.id) / (2 * zoom),
       n.position.y + 110,
       { zoom, duration: opts.duration ?? 350 },
     );
   }, []);
+  const locateNode = useCallback((id: string) => {
+    const n = useStore.getState().nodes.find((x) => x.id === id);
+    if (!n) return;
+    setSelectedNodeId(id);
+    const content = !isThoughtCard(n.data.stepKind);
+    const mode = getViewportMode();
+    if (mode.sheet && !content) useUiStore.getState().setPanelOpen(true);
+    if (content && mode.blockReader) toastMaterialDesktopHint();
+    centerNode(n, { zoom: 1 });
+  }, [centerNode, setSelectedNodeId]);
   const lang = useI18n((s) => s.lang);
   const condenseRunState = useUiStore((s) => s.condenseRun);
   const condenseBuilding = condenseRunState.status === 'building';
@@ -243,7 +269,7 @@ function Canvas() {
   // key button, the model picker, and the moment a generation actually
   // needs a model (streaming.ts opens it on the no-model error).
   const modelData = useModels();
-  void modelData;
+  const hasModel = (modelData?.models?.length ?? 0) > 0;
 
   // Backup nudge: the canvas lives in browser storage — durable across
   // restarts, but "clear site data" erases it. A substantial canvas that
@@ -270,6 +296,10 @@ function Canvas() {
     setTimeout(() => {
       const inst = rfInstance.current;
       if (!inst) return;
+      if (getViewportMode().sheet) {
+        refitCanvas(inst, 500, 0.1);
+        return;
+      }
       inst.fitView({ duration: 500, padding: 0.1 });
       // A laptop-sized window fits the whole example only at glyph zoom,
       // where every teaching card is unreadable. After the overview beat,
@@ -283,7 +313,7 @@ function Canvas() {
       }, 680);
     }, 100);
     // the example canvas is the classroom: first visit opens the lesson
-    if (!localStorage.getItem('thoughtdag.tutorialDone')) setTutorialOpen(true);
+    if (!localStorage.getItem('thoughtdag.tutorialDone') && !getViewportMode().narrowChrome) setTutorialOpen(true);
   }, [lang, setTutorialOpen]);
 
   // ── Orchestration (paradigm) mode helpers ──
@@ -310,7 +340,11 @@ function Canvas() {
   // reset the recenter baseline and refit the viewport.
   const afterProjectSwitch = useCallback(() => {
     prevNodeCount.current = useStore.getState().nodes.length;
-    setTimeout(() => rfInstance.current?.fitView({ duration: 300, padding: 0.2 }), 50);
+    setTimeout(() => {
+      const inst = rfInstance.current;
+      if (!inst) return;
+      refitCanvas(inst, 300, 0.2);
+    }, 50);
   }, []);
 
   // ── Content palette + canvas paste/drop: material lands where you point ──
@@ -386,8 +420,10 @@ function Canvas() {
       void ingestFiles(id, [f]);
       if (!readerTarget && !f.type.startsWith('image/')) readerTarget = id;
     });
-    if (readerTarget) useUiStore.getState().setReaderNodeId(readerTarget);
-    setTimeout(() => rfInstance.current?.fitView({ duration: 400, padding: 0.2 }), 120);
+    if (readerTarget && !getViewportMode().blockReader) {
+      useUiStore.getState().setReaderNodeId(readerTarget);
+    }
+    setTimeout(() => refitCanvas(rfInstance.current, 400, 0.2), 120);
   }, [filterDroppedFiles]);
 
   // Palette click-or-drag via pointer events (native DnD's click race lost
@@ -477,7 +513,7 @@ function Canvas() {
     await adoptImportedProject(id, `▶ ${pname}`, 'chat');
     await markInstantiatedFrom(id, pname); // provenance rides in the backup
     prevNodeCount.current = useStore.getState().nodes.length;
-    setTimeout(() => rfInstance.current?.fitView({ duration: 400, padding: 0.15 }), 150);
+    setTimeout(() => refitCanvas(rfInstance.current, 400, 0.15), 150);
   }, []);
 
   // First visit lands on the LANDING page — the example canvas is one
@@ -495,7 +531,9 @@ function Canvas() {
     if (nodes.length > prevNodeCount.current && rfInstance.current) {
       const newest = nodes[nodes.length - 1];
       if (newest) {
-        setTimeout(() => centerNode(newest, { zoom: 1, duration: 400, offX: 220 }), 100);
+        setTimeout(() => centerNode(newest, getViewportMode().sheet
+          ? { duration: 400, offX: 220 }
+          : { zoom: 1, duration: 400, offX: 220 }), 100);
       }
     }
     prevNodeCount.current = nodes.length;
@@ -599,6 +637,7 @@ function Canvas() {
   const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
   const onNodeContextMenu = useCallback((e: React.MouseEvent, node: { id: string }) => {
     if (isViewerMode) return; // read-only: keep the browser menu
+    if (!getViewportMode().gestures.nodesDraggable) return;
     // Right-click on selected TEXT keeps the native menu (copy must work)
     if (window.getSelection()?.toString()) return;
     e.preventDefault();
@@ -607,6 +646,7 @@ function Canvas() {
 
   const onEdgeContextMenu = useCallback(
     (event: React.MouseEvent, edge: { id: string }) => {
+      if (!getViewportMode().gestures.nodesDraggable) return;
       event.preventDefault();
       setEdgeMenu({ x: event.clientX, y: event.clientY, edgeId: edge.id });
     },
@@ -699,7 +739,7 @@ function Canvas() {
   const staleCount = useStore((s) => s.staleIds.length);
   const livePanelWidth = useUiStore((s) => s.panelWidth);
   const selectedKind = nodes.find((nd) => nd.id === selectedNodeId)?.data.stepKind;
-  const selectedIsContent = isContentKind(selectedKind) || selectedKind === 'frame';
+  const selectedIsContent = !isThoughtCard(selectedKind);
   const panelOpen = panelMode && !!selectedNodeId && !isParadigm && !selectedIsContent;
   const multiSelected = selectedNodeIds.length > 1;
   const batchDelete = useStore((s) => s.batchDelete);
@@ -1010,8 +1050,16 @@ function Canvas() {
   // the selection moves while it is open) and the selected node would be
   // hidden underneath it, the node re-centers in the space LEFT of the
   // panel — the visible half becomes the stage, not a peek-out sliver.
+  const wasSheet = useRef(sheet);
   useEffect(() => {
-    if (!panelOpen || !selectedNodeId) return;
+    if (sheet && !wasSheet.current && rfInstance.current) {
+      void landCompactCamera(rfInstance.current, useStore.getState().nodes);
+    }
+    wasSheet.current = sheet;
+  }, [sheet]);
+
+  useEffect(() => {
+    if (!panelOpen || !selectedNodeId || getViewportMode().sheet) return;
     const timer = setTimeout(() => {
       const rf = rfInstance.current;
       if (!rf) return;
@@ -1033,7 +1081,7 @@ function Canvas() {
     <div className="relative w-full h-full" data-searching={searching || undefined}>
       {/* Canvas — full width always; the focus panel floats on top of it */}
       <div
-        className="relative h-full w-full"
+        className={`relative h-full w-full ${sheet && panelOpen ? '[&_.react-flow]:pointer-events-none' : ''}`}
         onDoubleClick={(e) => {
           // Double-click on empty canvas → drop an ask node right there
           // (same gesture family as double-click-on-node = open panel)
@@ -1096,6 +1144,7 @@ function Canvas() {
           recapCamera.current = instance;
           // Debug: expose the flow instance for screenshot/e2e scripts (DEV only)
           if (import.meta.env.DEV) (window as unknown as { __rf?: typeof instance }).__rf = instance;
+          if (getViewportMode().sheet) refitCanvas(instance);
         }}
         nodes={displayNodes}
         edges={highlightedEdges}
@@ -1112,7 +1161,7 @@ function Canvas() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         deleteKeyCode={null}
-        fitView
+        fitView={gestures.initialFitView}
         // Cull off-viewport nodes: a content-heavy canvas keeps dozens of
         // full markdown/KaTeX card DOMs mounted otherwise, and zoom/pan
         // transforms all of them every frame.
@@ -1134,16 +1183,14 @@ function Canvas() {
         nodeDragThreshold={5}
         connectionRadius={40}
         selectionMode={SelectionMode.Partial}
-        // macOS trackpad: two-finger swipe pans (pinch still zooms);
-        // three-finger drag is an OS mouse-drag, so left-drag marquees.
-        selectionOnDrag={!isViewerMode}
-        nodesDraggable={!isViewerMode}
-        nodesConnectable={!isViewerMode}
-        panOnDrag={isViewerMode ? true : [1, 2]}
-        panOnScroll={isMacTrackpad}
-        zoomOnScroll={!isMacTrackpad}
-        zoomOnPinch
-        zoomOnDoubleClick={false}
+        selectionOnDrag={gestures.selectionOnDrag}
+        nodesDraggable={gestures.nodesDraggable}
+        nodesConnectable={gestures.nodesConnectable}
+        panOnDrag={gestures.panOnDrag}
+        panOnScroll={gestures.panOnScroll}
+        zoomOnScroll={gestures.zoomOnScroll}
+        zoomOnPinch={gestures.zoomOnPinch}
+        zoomOnDoubleClick={gestures.zoomOnDoubleClick}
         connectionLineStyle={{ stroke: themePalette.accent, strokeDasharray: '8 4', strokeWidth: 2 }}
         onSelectionChange={onSelectionChange}
         onPaneClick={() => { setSelectedNodeId(null); setSelectedNodeIds([]); setNodeMenu(null); }}
@@ -1158,10 +1205,11 @@ function Canvas() {
           <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="var(--canvas-dot)" />
         )}
         <ZoomTierTag />
+        {!narrowChrome && <>
         <ThoughtMapPill />
         <TimelineBar />
         <Controls position="bottom-left" />
-        {nodes.length > 0 && <MiniMap
+        {nodes.length > 0 ? <MiniMap
           nodeColor={(node) => {
             const data = node.data as Record<string, unknown>;
             // information density over decoration: type is color, archived
@@ -1178,7 +1226,8 @@ function Canvas() {
           pannable
           zoomable
           position="bottom-right"
-        />}
+        /> : null}
+        </>}
       </ReactFlow>
 
       {/* Initial input */}
@@ -1222,9 +1271,9 @@ function Canvas() {
         </div>
       )}
       {!hasNodes && !isParadigm && !isViewerMode && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden px-4">
           {/* Watermark: faint DAG sketches anchoring the corners */}
-          <svg className="absolute -left-10 top-[8%] w-[360px] h-[300px] opacity-[0.35] pointer-events-none" viewBox="0 0 360 300" aria-hidden>
+          {!narrowChrome && <><svg className="absolute -left-10 top-[8%] w-[360px] h-[300px] opacity-[0.35] pointer-events-none" viewBox="0 0 360 300" aria-hidden>
             <path d="M80 40 C80 90 80 90 80 130 M80 170 C80 210 80 210 80 250" stroke={COLORS.line} strokeWidth="2" fill="none" />
             <path d="M95 150 C150 150 150 90 205 88" stroke={COLORS.line} strokeWidth="2" strokeDasharray="6 5" fill="none" />
             <circle cx="80" cy="30" r="7" fill={COLORS.line} />
@@ -1239,9 +1288,9 @@ function Canvas() {
             <circle cx="240" cy="140" r="7" fill="none" stroke={COLORS.line} strokeWidth="2.5" />
             <circle cx="240" cy="252" r="7" fill={COLORS.line} />
             <circle cx="102" cy="212" r="7" fill={COLORS.line} />
-          </svg>
+          </svg></>}
 
-          <div className="pointer-events-auto w-[560px] animate-fade-in relative">
+          <div className="pointer-events-auto w-full max-w-[560px] animate-fade-in relative">
             <div className="text-center mb-8">
               {/* Mark: a tiny DAG lighting up — main chain in accent, explore branch in warm */}
               <svg width="52" height="52" viewBox="0 0 44 44" className="mx-auto mb-4" aria-hidden>
@@ -1253,11 +1302,11 @@ function Canvas() {
                 <line className="dag-pop" style={{ animationDelay: '0.8s' }} x1="25.5" y1="23.5" x2="33" y2="28.5" stroke={COLORS.warm} strokeWidth="2" strokeLinecap="round" strokeDasharray="3 3" />
                 <circle className="dag-pop" style={{ animationDelay: '0.95s' }} cx="36" cy="30" r="3.5" fill={COLORS.warm} />
               </svg>
-              <h1 className="text-4xl font-semibold tracking-tight text-ink mb-2.5">ThoughtDAG</h1>
+              <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-ink mb-2.5">ThoughtDAG</h1>
               <p className="text-sm text-ink-muted">{t('landing.tagline')}</p>
               <p className="text-xs text-ink-muted mt-1.5 font-medium">{t('landing.mechanism')}</p>
             </div>
-            <div
+            {(!narrowChrome || hasModel) && <div
               className="bg-card border border-line rounded-xl px-5 py-4 shadow-lg transition-all focus-within:border-accent/50 focus-within:shadow-xl"
             >
               <textarea
@@ -1272,7 +1321,7 @@ function Canvas() {
                 placeholder={t('landing.placeholder')}
                 className="w-full bg-transparent text-ink text-sm leading-relaxed resize-none focus:outline-none placeholder-ink-faint"
                 rows={3}
-                autoFocus
+                autoFocus={!coarse}
               />
               {/* Pending attachments preview */}
               {pendingAttachments.length > 0 && (
@@ -1348,7 +1397,7 @@ function Canvas() {
                   {pendingAttachments.some(a => a.isExtracting) ? t('landing.extracting') : t('landing.send')}
                 </button>
               </div>
-            </div>
+            </div>}
 
             {/* Second entrance: start from a document (material-first). The
                 whole landing is the drop target; this card names the gesture. */}
@@ -1359,7 +1408,7 @@ function Canvas() {
               }`}
             >
               <div className="flex items-center justify-center gap-2 text-sm text-ink-muted font-medium">
-                <BookOpen size={15} strokeWidth={1.75} className="text-accent" /> {t('landing.docStart')}
+                <BookOpen size={15} strokeWidth={1.75} className="text-accent" /> {narrowChrome ? t('compact.docStart') : t('landing.docStart')}
               </div>
               <p className="text-2xs text-ink-faint mt-1.5">{t('landing.docFormats')}</p>
               <p className="text-2xs text-ink-faint mt-0.5">{t('landing.docPrivacy')}</p>
@@ -1374,7 +1423,7 @@ function Canvas() {
             />
 
             {/* What makes this different — three quiet cards */}
-            <div className="grid grid-cols-3 gap-3 mt-6">
+            <div className={`grid gap-3 mt-6 ${narrowChrome ? 'grid-cols-1' : 'grid-cols-3'}`}>
               {([
                 { icon: GitBranch, title: 'landing.feature1.title', desc: 'landing.feature1.desc' },
                 { icon: Workflow, title: 'landing.feature2.title', desc: 'landing.feature2.desc' },
@@ -1443,6 +1492,14 @@ function Canvas() {
               >
                 <Workflow size={14} strokeWidth={1.75} /> {t('landing.loadExample')}
               </button>
+              {narrowChrome && (
+              <button
+                onClick={() => useUiStore.getState().setBackupDialogOpen(true)}
+                className="text-xs text-ink-muted hover:text-accent transition-colors inline-flex items-center gap-1.5"
+              >
+                <FolderSync size={14} strokeWidth={1.75} /> {t('backup.dialogTitle')}
+              </button>
+              )}
               <button
                 onClick={() => setTutorialOpen(true)}
                 className="text-xs text-ink-muted hover:text-accent transition-colors inline-flex items-center gap-1.5"
@@ -1460,7 +1517,7 @@ function Canvas() {
       {/* Content palette — canvas material, both modes. Click drops at the
           viewport center; DRAG drops at the pointer. Paste works anywhere:
           text → note, a URL → link snapshot, image/files → file node. */}
-      {(hasNodes || isParadigm) && !isViewerMode && (
+      {(hasNodes || isParadigm) && !isViewerMode && !narrowChrome && (
         <div className="absolute top-[38%] -translate-y-1/2 left-4 z-10 flex flex-col gap-1.5 bg-card/90 backdrop-blur border border-line rounded-xl p-1.5 shadow-sm">
           {!isParadigm && (
             <button
@@ -1501,8 +1558,8 @@ function Canvas() {
           link — every mutating control lives in the author toolbar below. */}
       {isViewerMode && (
         <div
-          className="absolute top-4 z-10 flex gap-1.5 items-center transition-[right] duration-200"
-          style={{ right: panelOpen ? livePanelWidth + PANEL_INSET + 12 : 16 }}
+          className="absolute z-10 flex gap-1.5 items-center transition-[right] duration-200"
+          style={{ top: 'max(16px, env(safe-area-inset-top))', right: toolbarRightPx(sheet, panelOpen, livePanelWidth) }}
         >
           <span className="bg-card/90 backdrop-blur border border-line rounded-lg h-8 px-3 flex items-center gap-1.5 shadow-sm text-ink-muted text-xs font-medium" data-viewer-badge>
             <Eye size={14} strokeWidth={1.75} /> {t('viewer.badge')}
@@ -1539,10 +1596,10 @@ function Canvas() {
           is open it slides left instead of hiding underneath. */}
       {!isViewerMode && (
       <div
-        className="absolute top-4 z-10 flex gap-1.5 items-center transition-[right] duration-200"
-        style={{ right: panelOpen ? livePanelWidth + PANEL_INSET + 12 : 16 }}
+        className="absolute z-10 flex gap-1.5 items-center transition-[right] duration-200"
+        style={{ top: 'max(16px, env(safe-area-inset-top))', right: toolbarRightPx(sheet, panelOpen, livePanelWidth) }}
       >
-        {isParadigm && (
+        {isParadigm && !narrowChrome && (
           <>
             <button
               onClick={() => addStep('human')}
@@ -1565,10 +1622,10 @@ function Canvas() {
             </button>
           </>
         )}
-        {!isParadigm && <ModelPicker />}
+        {!isParadigm && !narrowChrome && <ModelPicker />}
         {/* Landing convenience only: inside the canvas the picker's own
             empty state (Connect a model) is the door — no twin key icon */}
-        {!hasNodes && (
+        {!hasNodes && !narrowChrome && (
           <button
             onClick={() => useUiStore.getState().setApiKeyModalOpen(true)}
             className="bg-card/90 backdrop-blur border border-line rounded-lg w-8 h-8 flex items-center justify-center shadow-sm hover:bg-wash transition-colors text-ink-faint hover:text-accent"
@@ -1581,7 +1638,7 @@ function Canvas() {
         {/* Batch replay: visible only when something is stale. Price at the
             decision point — N generations is the one many-calls-per-click
             action in the app, so it confirms with a token estimate. */}
-        {staleCount > 0 && !isParadigm && (
+        {staleCount > 0 && !isParadigm && !narrowChrome && (
           <button
             onClick={() => {
               const { nodes: ns, edges: es, staleIds } = useStore.getState();
@@ -1603,7 +1660,7 @@ function Canvas() {
             <ListRestart size={14} strokeWidth={1.75} /> {staleCount}
           </button>
         )}
-        {hasNodes && frames.length > 0 && (
+        {hasNodes && frames.length > 0 && !narrowChrome && (
           <div ref={frameNavRef} className="relative">
             <button
               onClick={() => setFrameNavOpen((v) => !v)}
@@ -1647,18 +1704,12 @@ function Canvas() {
           </button>
         )}
         <LangSwitch />
-        {hasNodes && !isParadigm && (
-          <DiagnosticsPanel showTrigger={false} openPing={diagPing} onLocate={(id) => {
-            const n = useStore.getState().nodes.find((x) => x.id === id);
-            if (n) {
-              setSelectedNodeId(id);
-              centerNode(n, { zoom: 1 });
-            }
-          }} />
+        {hasNodes && !isParadigm && !narrowChrome && (
+          <DiagnosticsPanel showTrigger={false} openPing={diagPing} onLocate={locateNode} />
         )}
         {/* Condense while RUNNING is a status badge (click reopens progress);
             the launch entry lives in the ⋯ menu with the other tools. */}
-        {condenseBuilding && !isViewerMode && (
+        {condenseBuilding && !isViewerMode && !narrowChrome && (
           <button
             onClick={() => useUiStore.getState().setCondenseDialogOpen(true)}
             className="bg-card/90 backdrop-blur border border-accent/50 rounded-lg h-8 px-2 flex items-center justify-center gap-1.5 shadow-sm hover:bg-wash transition-colors text-accent"
@@ -1668,7 +1719,7 @@ function Canvas() {
             <Loader2 size={14} strokeWidth={1.75} className="animate-spin" /><span className="text-2xs font-mono">{condenseRunState.current}/{condenseRunState.total}</span>
           </button>
         )}
-        {!isViewerMode && (
+        {!isViewerMode && !narrowChrome && (
           <button
             onClick={() => useUiStore.getState().setBackupDialogOpen(true)}
             className="bg-card/90 backdrop-blur border border-line rounded-lg w-8 h-8 flex items-center justify-center shadow-sm hover:bg-wash transition-colors text-ink-muted hover:text-accent"
@@ -1702,7 +1753,7 @@ function Canvas() {
                   <StickyNote size={14} strokeWidth={1.75} className={`shrink-0 ${annotationsHidden ? 'text-accent' : 'text-ink-faint'}`} /> {annotationsHidden ? t('toolbar.menuAnnotationsShow') : t('toolbar.menuAnnotationsHide')}
                 </button>
               )}
-              {hasNodes && (
+              {hasNodes && !narrowChrome && (
                 <button
                   onClick={() => {
                     setMoreOpen(false);
@@ -1713,7 +1764,7 @@ function Canvas() {
                     }).then((ok) => {
                       if (!ok) return;
                       relayout();
-                      setTimeout(() => rfInstance.current?.fitView({ duration: 400, padding: 0.15 }), 50);
+                      setTimeout(() => refitCanvas(rfInstance.current, 400, 0.15), 50);
                     });
                   }}
                   className="w-full text-left px-3 py-2 text-xs text-ink hover:bg-wash transition-colors flex items-center gap-2.5"
@@ -1742,7 +1793,7 @@ function Canvas() {
                 </button>
               )}
               {hasNodes && <div className="border-t border-line/60 my-1" />}
-              {hasNodes && !isParadigm && !isViewerMode && (
+              {hasNodes && !isParadigm && !isViewerMode && !narrowChrome && (
                 <button
                   onClick={() => { setMoreOpen(false); useUiStore.getState().setCondenseDialogOpen(true); }}
                   className="w-full text-left px-3 py-2 text-xs text-ink hover:bg-wash transition-colors flex items-center gap-2.5"
@@ -1751,7 +1802,7 @@ function Canvas() {
                   <Minimize2 size={14} strokeWidth={1.75} className="text-ink-faint shrink-0" /> {t('condense.title')}…
                 </button>
               )}
-              {hasNodes && !isParadigm && (
+              {hasNodes && !isParadigm && !narrowChrome && (
                 <button
                   onClick={() => { setMoreOpen(false); setDiagPing((v) => v + 1); }}
                   className="w-full text-left px-3 py-2 text-xs text-ink hover:bg-wash transition-colors flex items-center gap-2.5"
@@ -1829,6 +1880,14 @@ function Canvas() {
                 </div>
               </div>
               <div className="border-t border-line/60 my-1" />
+              {narrowChrome && !isViewerMode && (
+                <button
+                  onClick={() => { setMoreOpen(false); useUiStore.getState().setBackupDialogOpen(true); }}
+                  className="w-full text-left px-3 py-2 text-xs text-ink hover:bg-wash transition-colors flex items-center gap-2.5"
+                >
+                  <FolderSync size={14} strokeWidth={1.75} className="text-ink-faint shrink-0" /> {t('backup.dialogTitle')}
+                </button>
+              )}
               <button
                 onClick={() => { setMoreOpen(false); useUiStore.getState().setMemoryManagerOpen(true); }}
                 className="w-full text-left px-3 py-2 text-xs text-ink hover:bg-wash transition-colors flex items-center gap-2.5"
@@ -1845,6 +1904,7 @@ function Canvas() {
             </div>
           )}
         </div>
+        {!narrowChrome && <>
         <button
           onClick={undo}
           disabled={historyIndex <= 0}
@@ -1861,52 +1921,31 @@ function Canvas() {
         >
           <Redo2 size={16} strokeWidth={1.75} />
         </button>
+        </>}
       </div>
       )}
 
       {/* Multi-select toolbar */}
-      {multiSelected && !isViewerMode && <SelectionToolbar />}
+      {multiSelected && !isViewerMode && gestures.selectionOnDrag && <SelectionToolbar />}
 
       {/* Cmd+F node search */}
       <SearchBar
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
         onLocate={(id) => {
-          const n = useStore.getState().nodes.find((x) => x.id === id);
-          if (n) {
-            setSelectedNodeId(id);
-            centerNode(n, { zoom: 1 });
-          }
+          locateNode(id);
           // search stays open: the filter is a browsing mode, Esc ends it
         }}
       />
 
       {/* Edge context menu */}
-      {nodeMenu && (
+      {nodeMenu && gestures.nodesDraggable && (
         <NodeContextMenu x={nodeMenu.x} y={nodeMenu.y} nodeId={nodeMenu.nodeId} onClose={() => setNodeMenu(null)} />
       )}
-      <MaterialsOverviewModal onLocate={(nid) => {
-        const n = useStore.getState().nodes.find((x) => x.id === nid);
-        if (n) {
-          setSelectedNodeId(nid);
-          centerNode(n, { zoom: 1 });
-        }
-      }} />
-      <TimelineOverviewModal onLocate={(nid) => {
-        const n = useStore.getState().nodes.find((x) => x.id === nid);
-        if (n) {
-          setSelectedNodeId(nid);
-          centerNode(n, { zoom: 1 });
-        }
-      }} />
-      <HighlightsOverviewModal onLocate={(nid) => {
-        const n = useStore.getState().nodes.find((x) => x.id === nid);
-        if (n) {
-          setSelectedNodeId(nid);
-          centerNode(n, { zoom: 1 });
-        }
-      }} />
-      {edgeMenu && (
+      <MaterialsOverviewModal onLocate={locateNode} />
+      <TimelineOverviewModal onLocate={locateNode} />
+      <HighlightsOverviewModal onLocate={locateNode} />
+      {edgeMenu && gestures.nodesDraggable && (
         <div
           className="fixed z-50 bg-card border border-line rounded-xl shadow-lg py-1 min-w-[120px]"
           style={{ left: edgeMenu.x, top: edgeMenu.y }}
@@ -1937,19 +1976,18 @@ function Canvas() {
         rf.fitBounds({ x, y, width: w + 700, height: h }, { duration: 350, padding: 0.15 });
       }} />
       {panelOpen && <FocusPanel onFocusNode={(id) => {
-        const node = nodes.find(n => n.id === id);
-        if (node) centerNode(node, { duration: 300 });
+        locateNode(id);
       }} />}
 
       {/* Material reading overlay: select a passage, ask, the node lands on
           the canvas immediately (a view onto the material, not a container) */}
-      <MaterialReader onLocate={(id) => {
+      {!blockReader && <MaterialReader onLocate={(id) => {
         const n = useStore.getState().nodes.find((x) => x.id === id);
         if (n) {
           setSelectedNodeId(id);
           centerNode(n, { zoom: 1 });
         }
-      }} />
+      }} />}
     </div>
   );
 }

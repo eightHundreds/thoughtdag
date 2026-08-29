@@ -7,6 +7,8 @@ import { isImeComposing } from '../utils';
 import { FRAME_COLORS } from '../lib/constants';
 import { useT } from '../i18n';
 import { isViewerMode } from '../lib/viewer';
+import { useViewportMode } from '../lib/use-viewport-mode';
+import { plaqueDragClass } from '../lib/use-plaque-tap';
 
 // Frame: a labeled background region — THE spatial annotation. No handles
 // (it can never be wired, so it can never touch context), ignored by
@@ -27,6 +29,8 @@ export default function FrameNode({ id, data, selected }: NodeProps<ThoughtNodeT
 
   const [editing, setEditing] = useState(!isViewerMode && !data.question);
   const [draft, setDraft] = useState(data.question);
+  const { gestures } = useViewportMode();
+  const dragClass = plaqueDragClass(gestures.nodesDraggable);
 
   const color = FRAME_COLORS[data.frameColor ?? 'gray'] ?? FRAME_COLORS.gray;
   // Carry: dragging the frame moves the nodes inside it. Absent = linked
@@ -56,7 +60,7 @@ export default function FrameNode({ id, data, selected }: NodeProps<ThoughtNodeT
     >
       {/* Title bar — drag surface; counter-scaled width keeps it spanning the frame */}
       <div
-        className="drag-handle cursor-grab active:cursor-grabbing px-4 py-2 flex items-center gap-2 min-w-0"
+        className={`${dragClass}px-4 py-2 flex items-center gap-2 min-w-0`}
         style={barScale > 1 ? { transform: `scale(${barScale})`, transformOrigin: 'top left', width: `${100 / barScale}%` } : undefined}
       >
         {editing ? (
@@ -125,9 +129,9 @@ export default function FrameNode({ id, data, selected }: NodeProps<ThoughtNodeT
       {/* Edge strips: the border is a drag handle too, so a large frame can be
           moved without reaching its title bar. Rendered BEFORE the resizer so
           the resizer's handles win when the frame is selected. */}
-      <div className="drag-handle absolute inset-x-0 bottom-0 h-2.5 cursor-grab active:cursor-grabbing" />
-      <div className="drag-handle absolute inset-y-0 left-0 w-2.5 cursor-grab active:cursor-grabbing" />
-      <div className="drag-handle absolute inset-y-0 right-0 w-2.5 cursor-grab active:cursor-grabbing" />
+      <div className={`${dragClass}absolute inset-x-0 bottom-0 h-2.5`} />
+      <div className={`${dragClass}absolute inset-y-0 left-0 w-2.5`} />
+      <div className={`${dragClass}absolute inset-y-0 right-0 w-2.5`} />
       {/* resize handles: NO manual scaling — React Flow's autoScale already
           counter-scales them (Math.max(1/zoom, 1)), so they keep a constant
           screen size; scaling here again would compound to huge squares */}

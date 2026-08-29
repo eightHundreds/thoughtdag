@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Handle, Position, useReactFlow, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { AlertTriangle, Archive, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Eye, GitBranch, Globe, Hourglass, Minimize2, Paperclip, RefreshCw, Send, Split, Square, Star, Trash2, UserRound, X, Pencil } from 'lucide-react';
 import 'katex/dist/katex.min.css';
@@ -20,6 +20,9 @@ import { useT, fmt } from '../i18n';
 import MentionSurface from './ui/NodeMention';
 import { useMentions } from '../lib/mentions';
 import { isViewerMode } from '../lib/viewer';
+import { useViewportMode } from '../lib/use-viewport-mode';
+import { plaqueDragClass, usePlaqueTap } from '../lib/use-plaque-tap';
+import { useTextSelection } from '../lib/use-text-selection';
 
 export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeType>) {
   // Actions are stable references: selecting them one by one (instead of a
@@ -46,8 +49,6 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
   const [fanoutOpen, setFanoutOpen] = useState(false);
   // fan-out placeholder shows its expand button until branches exist
   const hasFanoutChildren = useStore((s) => s.edges.some((e) => e.source === id && e.data?.isBranchFromSelection));
-  const [selectedText, setSelectedText] = useState('');
-  const [selectionPos, setSelectionPos] = useState<{ x: number; y: number } | null>(null);
   const inlineDraftKey = `inline:${id}`;
   const [inputValue, setInputValueState] = useState(() => useUiStore.getState().drafts[inlineDraftKey] ?? '');
   const mention = useMentions(id);
@@ -66,6 +67,16 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
   const rf = useReactFlow();
   const zoomTier = useZoomTier();
   const mapMode = zoomTier !== 'work';
+  const { sheet, coarse, gestures } = useViewportMode();
+  const nodesDraggable = gestures.nodesDraggable;
+  const dragClass = plaqueDragClass(nodesDraggable);
+  const plaqueTap = usePlaqueTap(() => {
+    setSelectedNodeId(id);
+    if (sheet) useUiStore.getState().setPanelOpen(true);
+  }, !nodesDraggable);
+  const selection = useTextSelection(responseRef, !isViewerMode && !sheet, nodeRef);
+  const selectedText = selection.text;
+  const selectionPos = selection.pos;
 
   // ── Paradigm run semantics (instantiated human/prompt steps) ──
   const isHuman = data.stepKind === 'human';
@@ -141,59 +152,31 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
   // Re-focus a fresh ask / human slot shortly after mount instead.
   useEffect(() => {
     if (!isAwaitingAsk && !isAwaitingHuman) return;
+    if (coarse) return;
     const timer = setTimeout(() => questionTaRef.current?.focus(), 80);
     return () => clearTimeout(timer);
     // mount-only: a node awaits input exactly once, at creation
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleTextSelection = useCallback(() => {
-    const selection = window.getSelection();
-    if (selection && selection.toString().trim().length > 0 && responseRef.current?.contains(selection.anchorNode)) {
-      const text = selection.toString().trim();
-      setSelectedText(text);
-      const range = selection.getRangeAt(0);
-      const rangeRect = range.getBoundingClientRect();
-      const nodeRect = nodeRef.current?.getBoundingClientRect();
-      if (nodeRect) {
-        setSelectionPos({
-          x: rangeRect.left + rangeRect.width / 2 - nodeRect.left,
-          y: rangeRect.top - nodeRect.top - 48,
-        });
-      }
-    } else {
-      setSelectedText('');
-      setSelectionPos(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isViewerMode) return; // no selection menu (branch/highlight are writes)
-    document.addEventListener('mouseup', handleTextSelection);
-    return () => document.removeEventListener('mouseup', handleTextSelection);
-  }, [handleTextSelection]);
-
   const handleBranch = () => {
     setBranchFromText(selectedText);
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0 && nodeRef.current) {
-      const range = selection.getRangeAt(0);
+    const rangeSel = window.getSelection();
+    if (rangeSel && rangeSel.rangeCount > 0 && nodeRef.current) {
+      const range = rangeSel.getRangeAt(0);
       const selRect = range.getBoundingClientRect();
       const nodeRect = nodeRef.current.getBoundingClientRect();
       const ratio = Math.max(0.1, Math.min(0.9, (selRect.top + selRect.height / 2 - nodeRect.top) / nodeRect.height));
       setBranchYRatio(ratio);
     }
     setInputValue('');
-    setSelectedText('');
-    setSelectionPos(null);
+    selection.clear();
   };
 
   const handleHighlight = () => {
     if (!selectedText) return;
     addHighlight(id, { id: generateId(), text: selectedText });
-    setSelectedText('');
-    setSelectionPos(null);
-    window.getSelection()?.removeAllRanges();
+    selection.clear();
   };
 
   const handleSubmitBranch = () => {
@@ -207,8 +190,7 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
     mention.clear();
     setInputValue('');
     setBranchFromText('');
-    setSelectedText('');
-    setSelectionPos(null);
+    selection.clear();
   };
 
   const handleDoubleClickQuestion = (e: React.MouseEvent) => {
@@ -360,13 +342,17 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
       className={`thought-node relative rounded-xl w-[520px] ${zoomedOut ? 'h-full map-node ' : ''}${glyphTier ? 'glyph-node ' : ''}${isBeacon ? 'beacon-node ' : ''}animate-fade-in transition-colors duration-200 ${condenseLit ? 'condense-lit ' : ''}${data.archived ? 'opacity-35 saturate-50 ' : ''}${isWaitingUpstream ? 'opacity-60 ' : ''}${
         data.isEvaluator ? 'evaluator-node' : isHuman ? 'human-node' : isBranch ? 'orange-node' : isRoot ? 'root-node' : 'branch-node'
       } ${data.isLoading ? 'loading-border' : ''} ${selectedNodeId === id ? `ring-2 ring-accent !border-accent selected-glow${glyphTier ? ' glyph-selected' : ''}` : ''} ${isDropTarget ? 'ring-2 ring-accent/50 ring-dashed' : ''}`}
-      onClick={() => setSelectedNodeId(id)}
+      onClick={() => { if (nodesDraggable) setSelectedNodeId(id); }}
       onDoubleClick={() => {
+        if (!nodesDraggable) return;
         // Double-click opens the panel (single click only selects); inner
         // editors (question/response) stop propagation to stay inline
         setSelectedNodeId(id);
         useUiStore.getState().setPanelOpen(true);
       }}
+      onPointerDown={plaqueTap.onPointerDown}
+      onPointerUp={plaqueTap.onPointerUp}
+      onPointerCancel={plaqueTap.onPointerCancel}
       onDrop={async (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -431,7 +417,7 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
         // Typed moves keep their color, takeaway-bearing steps spark ✦,
         // evaluators wear the red eye, digests the book, plain steps a dot.
         <div
-          className="drag-handle cursor-grab active:cursor-grabbing w-full h-full flex items-center justify-center"
+          className={`${dragClass}w-full h-full flex items-center justify-center`}
           title={[
             data.isEvaluator
               ? t('evaluator.badge')
@@ -469,9 +455,10 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
         // title — the reader's entry point — so there question leads and
         // the takeaway is the subtitle.
         <div
-          className="drag-handle cursor-grab active:cursor-grabbing px-6 py-5 relative w-full h-full flex flex-col justify-start"
+          className={`${dragClass}px-6 py-5 relative w-full h-full flex flex-col justify-start`}
           onDoubleClick={(e) => {
             e.stopPropagation();
+            if (sheet) return;
             // a plaque is a map label: double-click dives to working scale
             const n = rf.getNode(id);
             if (n) rf.setCenter(n.position.x + 260, n.position.y + 120, { zoom: 1, duration: 300 });
@@ -511,7 +498,7 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
       ) : (
       <>
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-line cursor-grab active:cursor-grabbing drag-handle">
+      <div className={`flex items-center justify-between px-6 py-3 border-b border-line ${dragClass}`}>
         <div className="flex items-center gap-2">
           <button onClick={() => toggleCollapse(id)} className={`hover:bg-wash rounded-lg w-7 h-7 flex items-center justify-center transition-all text-sm font-bold ${data.isCollapsed ? 'text-accent bg-accent/10' : 'text-ink-faint'}`}>
             {data.isCollapsed ? <ChevronRight size={18} strokeWidth={1.75} /> : <ChevronDown size={18} strokeWidth={1.75} />}
@@ -756,7 +743,7 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
             <div
               ref={responseRef}
               onClick={handleResponseClick}
-              className="markdown-body text-sm text-ink leading-relaxed max-h-[400px] overflow-y-auto cursor-text nopan nodrag nowheel px-3 py-2.5 bg-surface rounded-xl"
+              className={`markdown-body text-sm text-ink leading-relaxed max-h-[400px] overflow-y-auto nowheel px-3 py-2.5 bg-surface rounded-xl ${nodesDraggable ? 'cursor-text nopan nodrag' : ''}`}
             >
               {highlightedTexts.size > 0 || exploreSpecs.length > 0 ? (
                 <HighlightedMarkdown content={data.response} highlights={highlightedTexts} exploreMarks={exploreSpecs} />
@@ -986,7 +973,7 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
       />
 
       {/* Floating toolbar for text selection */}
-      {selectedText && selectionPos && (
+      {!sheet && selectedText && selectionPos && (
         <div
           style={{
             position: 'absolute',

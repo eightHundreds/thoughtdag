@@ -5,6 +5,7 @@ import { isImeComposing } from '../../utils';
 import { useT } from '../../i18n';
 import { isViewerMode } from '../../lib/viewer';
 import { toast } from '../../lib/ui-store';
+import { useViewportMode } from '../../lib/use-viewport-mode';
 
 export default function QuestionSection({
   nodeId,
@@ -28,6 +29,7 @@ export default function QuestionSection({
 }) {
   const editQuestion = useStore((s) => s.editQuestion);
   const submitHumanTurn = useStore((s) => s.submitHumanTurn);
+  const { coarse } = useViewportMode();
   const setEditing = useStore((s) => s.setEditing);
   const t = useT();
 
@@ -97,7 +99,7 @@ export default function QuestionSection({
             placeholder={placeholder}
             className="w-full bg-wash border border-accent rounded-xl p-3 text-sm text-ink resize-none focus:outline-none focus:ring-2 focus:ring-accent/20"
             rows={3}
-            autoFocus
+            autoFocus={!coarse}
           />
           {!awaiting && !isHuman && (
             <div className="flex items-center justify-end gap-2 mt-1.5">

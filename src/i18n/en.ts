@@ -34,6 +34,8 @@ export const en = {
   'toolbar.advancedToggle': 'Paradigms (advanced)',
   'toolbar.advancedTitle': 'When on, the landing page and canvas switcher show paradigm entrances: reusable human-machine workflows',
   'landing.loadExample': 'Load example canvas',
+  'compact.materialDesktopHint': 'Open the original on a computer',
+  'compact.docStart': 'Open a PDF or document',
   'landing.feature1.title': 'Branch anywhere',
   'landing.feature1.desc': 'Select any passage of an answer and fork a new line of thought from it.',
   'landing.feature2.title': 'Edges are context',

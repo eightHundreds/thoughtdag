@@ -7,6 +7,7 @@ import { walkUpAncestors } from '../lib/graph';
 import { referenceBlockContent } from '../store/context-builder';
 import { countTokens } from '../utils';
 import { useT, fmt } from '../i18n';
+import { useViewportMode } from '../lib/use-viewport-mode';
 import type { ThoughtEdge } from '../types';
 
 /**
@@ -28,6 +29,7 @@ export default function ThoughtEdgeView({
   const nodes = useStore((s) => s.nodes);
   const edges = useStore((s) => s.edges);
   const t = useT();
+  const { sheet } = useViewportMode();
 
   // The line kind IS the context weight: dashed = summary reference, solid
   // = full wiring (files included). Selected, the edge wears a chip that
@@ -79,7 +81,7 @@ export default function ThoughtEdgeView({
         // dashed is taken: references)
         <path d={path} className="tdag-flow-ov" fill="none" />
       )}
-      {selected && (
+      {selected && !sheet && (
         <EdgeLabelRenderer>
           <div
             className="nodrag nopan"

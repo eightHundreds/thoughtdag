@@ -8,6 +8,7 @@ import { confirmDialog, toast } from '../lib/ui-store';
 import { isImeComposing } from '../utils';
 import { useT, t as ti, fmt, useI18n } from '../i18n';
 import { generateCanvasTitle } from '../lib/canvas-title';
+import { useViewportMode } from '../lib/use-viewport-mode';
 
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -23,6 +24,7 @@ function relativeTime(ts: number): string {
 
 export default function ProjectSwitcher({ onSwitched }: { onSwitched: () => void }) {
   const t = useT();
+  const { narrowChrome } = useViewportMode();
   const projects = useProjects((s) => s.projects);
   const activeId = useProjects((s) => s.activeId);
   const switching = useProjects((s) => s.switching);
@@ -74,11 +76,15 @@ export default function ProjectSwitcher({ onSwitched }: { onSwitched: () => void
   return (
     // z-20: the open dropdown must cover the content palette below (both
     // live on the left edge; the palette is z-10)
-    <div ref={rootRef} className="absolute top-4 left-4 z-20">
+    <div ref={rootRef} className="absolute z-20" style={{ top: 'max(16px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))' }}>
       <button
         onClick={() => setOpen(!open)}
         disabled={switching}
-        className="bg-card/90 backdrop-blur border border-line rounded-xl px-3.5 py-2 shadow-sm hover:bg-wash transition-colors flex items-center gap-2 text-sm text-ink max-w-[240px] disabled:opacity-60"
+        className={`bg-card/90 backdrop-blur border border-line rounded-xl shadow-sm hover:bg-wash transition-colors flex items-center gap-2 text-sm text-ink disabled:opacity-60 ${
+          narrowChrome
+            ? 'px-2.5 py-1.5 max-w-[min(9.5rem,calc(100vw-11.5rem))]'
+            : 'px-3.5 py-2 max-w-[240px]'
+        }`}
       >
         {switching
           ? <Loader2 size={16} strokeWidth={1.75} className="animate-spin shrink-0 text-accent" />
@@ -90,12 +96,12 @@ export default function ProjectSwitcher({ onSwitched }: { onSwitched: () => void
       </button>
 
       {open && (
-        <div className="mt-1.5 bg-card border border-line rounded-xl shadow-lg py-1.5 w-[280px] animate-fade-in">
+        <div className="mt-1.5 bg-card border border-line rounded-xl shadow-lg py-1.5 w-[min(280px,calc(100vw-24px))] animate-fade-in">
           <div className="max-h-[320px] overflow-y-auto">
             {sorted.map((p) => (
               <div
                 key={p.id}
-                className={`group flex items-center gap-1 px-3 py-2 hover:bg-wash cursor-pointer transition-colors ${p.id === activeId ? 'bg-accent/5' : ''}`}
+                className={`group flex items-start gap-1 px-3 py-2 hover:bg-wash cursor-pointer transition-colors ${p.id === activeId ? 'bg-accent/5' : ''}`}
                 onClick={() => { if (renamingId !== p.id && p.id !== activeId) void doSwitch(p.id); }}
               >
                 {renamingId === p.id ? (
@@ -117,7 +123,7 @@ export default function ProjectSwitcher({ onSwitched }: { onSwitched: () => void
                 ) : (
                   <>
                     <div className="flex-1 min-w-0">
-                      <div className={`text-sm truncate ${p.id === activeId ? 'text-accent font-medium' : 'text-ink'}`}>
+                      <div className={`text-sm break-all ${p.id === activeId ? 'text-accent font-medium' : 'text-ink'}`}>
                         {p.name}
                       </div>
                       <div className="text-2xs text-ink-faint">{relativeTime(p.updatedAt)}</div>
@@ -126,7 +132,7 @@ export default function ProjectSwitcher({ onSwitched }: { onSwitched: () => void
                       title={t('switcher.autoName')}
                       disabled={namingId === p.id}
                       data-auto-name
-                      className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-accent p-1 rounded transition-all shrink-0 disabled:opacity-100"
+                      className={`${narrowChrome ? 'hidden' : 'opacity-0 group-hover:opacity-100'} text-ink-faint hover:text-accent p-1 rounded transition-all shrink-0 disabled:opacity-100`}
                       onClick={(e) => { e.stopPropagation(); void doAutoName(p.id); }}
                     >
                       {namingId === p.id
@@ -135,14 +141,14 @@ export default function ProjectSwitcher({ onSwitched }: { onSwitched: () => void
                     </button>
                     <button
                       title={t('switcher.rename')}
-                      className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-ink p-1 rounded transition-all shrink-0"
+                      className={`${narrowChrome ? 'hidden' : 'opacity-0 group-hover:opacity-100'} text-ink-faint hover:text-ink p-1 rounded transition-all shrink-0`}
                       onClick={(e) => { e.stopPropagation(); setRenamingId(p.id); setRenameValue(p.name); }}
                     >
                       <Pencil size={14} strokeWidth={1.75} />
                     </button>
                     <button
                       title={t('common.delete')}
-                      className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-red-500 p-1 rounded transition-all shrink-0"
+                      className={`${narrowChrome ? 'hidden' : 'opacity-0 group-hover:opacity-100'} text-ink-faint hover:text-red-500 p-1 rounded transition-all shrink-0`}
                       onClick={(e) => {
                         e.stopPropagation();
                         void confirmDialog({

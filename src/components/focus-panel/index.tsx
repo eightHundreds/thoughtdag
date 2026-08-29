@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
+import { useViewportMode } from '../../lib/use-viewport-mode';
+import { useKeyboardInset } from '../../lib/use-keyboard-inset';
+import { isViewerMode } from '../../lib/viewer';
 import { useStore } from '../../store';
 import { useUiStore } from '../../lib/ui-store';
 import { partitionContext } from '../../lib/graph';
@@ -7,7 +10,6 @@ import { buildContext, resolveRoleFor } from '../../store/context-builder';
 import { PANEL_WIDTH_KEY, PANEL_MIN_WIDTH, PANEL_DEFAULT_WIDTH, PANEL_INSET } from '../../lib/constants';
 import { awaitingInput } from '../../utils';
 import { useT } from '../../i18n';
-import { isViewerMode } from '../../lib/viewer';
 import RoleLine from './RoleLine';
 import AttachmentsSection from './AttachmentsSection';
 import QuestionSection from './QuestionSection';
@@ -27,6 +29,8 @@ export default function FocusPanel({ onFocusNode }: { onFocusNode?: (id: string)
     addAttachment, removeAttachment, toggleExcludeAttachment, setAttachmentRenderMode, getInheritedAttachments,
   } = useStore();
   const t = useT();
+  const { sheet } = useViewportMode();
+  const keyboardInset = useKeyboardInset();
 
   // Selected text from the response, staged as context for the follow-up
   const [branchContext, setBranchContext] = useState('');
@@ -94,11 +98,20 @@ export default function FocusPanel({ onFocusNode }: { onFocusNode?: (id: string)
   return (
     <div
       data-focus-panel
-      className={`absolute right-3 top-3 bottom-3 z-20 bg-wash border border-line rounded-2xl shadow-xl overflow-hidden flex flex-col ${resizing ? 'select-none' : ''}`}
-      style={{ width: panelWidth, minWidth: PANEL_MIN_WIDTH, maxWidth: '70vw' }}
+      className={sheet
+        ? `fixed inset-0 z-30 bg-wash flex flex-col overflow-hidden ${resizing ? 'select-none' : ''}`
+        : `absolute right-3 top-3 bottom-3 z-20 bg-wash border border-line rounded-2xl shadow-xl overflow-hidden flex flex-col ${resizing ? 'select-none' : ''}`}
+      style={sheet
+        ? {
+            paddingTop: 'max(12px, env(safe-area-inset-top))',
+            paddingBottom: keyboardInset,
+            paddingLeft: 'env(safe-area-inset-left)',
+            paddingRight: 'env(safe-area-inset-right)',
+          }
+        : { width: panelWidth, minWidth: PANEL_MIN_WIDTH, maxWidth: '70vw' }}
     >
       {/* Resize handle on the left edge */}
-      <div
+      {!sheet && <div
         onPointerDown={onResizePointerDown}
         onPointerMove={onResizePointerMove}
         onPointerUp={onResizePointerUp}
@@ -109,14 +122,17 @@ export default function FocusPanel({ onFocusNode }: { onFocusNode?: (id: string)
       >
         {/* a visible grip: the handle exists whether or not you hover it */}
         <div className={`w-[3px] h-9 rounded-full transition-colors ${resizing ? 'bg-accent' : 'bg-line-strong'}`} />
-      </div>
+      </div>}
       {/* Header: summary kicker (role · tokens · materials) + action strip */}
       <div className="flex items-start gap-2 pl-4 pr-3 py-1.5 border-b border-line/70 shrink-0">
         <RoleLine nodeId={selectedNodeId!} data={data} inheritedRole={inheritedRole} />
         <div className="flex items-center gap-1 shrink-0">
           {!isViewerMode && <HeaderActions nodeId={selectedNodeId!} isLoading={data.isLoading} />}
           <button
-            onClick={() => { useUiStore.getState().setPanelOpen(false); setSelectedNodeId(null); }}
+            onClick={() => {
+              useUiStore.getState().setPanelOpen(false);
+              if (!sheet) setSelectedNodeId(null);
+            }}
             title={t('panel.close')}
             className="text-ink-faint hover:text-ink transition-colors shrink-0 ml-1 h-8 flex items-center"
           >

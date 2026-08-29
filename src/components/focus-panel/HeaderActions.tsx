@@ -5,12 +5,14 @@ import { contextChainMarkdown, downloadMarkdown, copyText } from '../../lib/expo
 import ModelPicker from '../ui/ModelPicker';
 import FanOutModal from '../FanOutModal';
 import { useT } from '../../i18n';
+import { useViewportMode } from '../../lib/use-viewport-mode';
 
 // Compact action strip: the two actions you actually reach for (regenerate,
 // archive) plus the model chip, everything else behind "…". Perspectives
 // (once = candidates, follow = reviewers) live here until the palette lands.
 
 export default function HeaderActions({ nodeId, isLoading }: { nodeId: string; isLoading: boolean }) {
+  const { sheet } = useViewportMode();
   const regenerate = useStore((s) => s.regenerate);
   const rerunNode = useStore((s) => s.rerunNode);
   const stopGeneration = useStore((s) => s.stopGeneration);
@@ -60,16 +62,16 @@ export default function HeaderActions({ nodeId, isLoading }: { nodeId: string; i
           <RefreshCw size={16} strokeWidth={1.75} className={isLoading ? 'animate-spin' : ''} />
         </button>
       )}
-      <button
+      {!sheet && <button
         onClick={() => setArchived([nodeId], !isArchived)}
         title={isArchived ? t('archive.restoreTitle') : t('archive.title')}
         className={isArchived ? 'text-amber-600 bg-amber-500/10 rounded-lg w-8 h-8 flex items-center justify-center' : iconBtn}
       >
         {isArchived ? <ArchiveRestore size={16} strokeWidth={1.75} /> : <Archive size={16} strokeWidth={1.75} />}
-      </button>
+      </button>}
       <ModelPicker compact value={nodeModel} onChange={(m) => setNodeModel(nodeId, m)} />
 
-      <div ref={menuRef} className="relative">
+      {!sheet && <div ref={menuRef} className="relative">
         <button onClick={() => setMenuOpen((v) => !v)} title={t('panel.more')} className={`${iconBtn} ${menuOpen ? 'bg-line/50 text-ink' : ''}`}>
           <Ellipsis size={17} strokeWidth={1.75} />
         </button>
@@ -99,7 +101,7 @@ export default function HeaderActions({ nodeId, isLoading }: { nodeId: string; i
             </button>
           </div>
         )}
-      </div>
+      </div>}
 
       {fanOutOpen && (
         <FanOutModal parentId={nodeId} initialQuestion={nodeQuestion} onClose={() => setFanOutOpen(false)} />
