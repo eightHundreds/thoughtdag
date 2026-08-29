@@ -21,8 +21,10 @@ import MentionSurface from './ui/NodeMention';
 import { useMentions } from '../lib/mentions';
 import { isViewerMode } from '../lib/viewer';
 import { useViewportMode } from '../lib/use-viewport-mode';
-import { plaqueDragClass, usePlaqueTap } from '../lib/use-plaque-tap';
+import { plaqueDragClass, useNodeDrag, usePlaqueTap } from '../lib/use-plaque-tap';
+import { cardStealsPan } from '../lib/viewport-mode';
 import { useTextSelection } from '../lib/use-text-selection';
+import { toastMaterialDesktopHint } from '../lib/compact-ui';
 
 export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeType>) {
   // Actions are stable references: selecting them one by one (instead of a
@@ -67,13 +69,14 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
   const rf = useReactFlow();
   const zoomTier = useZoomTier();
   const mapMode = zoomTier !== 'work';
-  const { sheet, coarse, gestures } = useViewportMode();
-  const nodesDraggable = gestures.nodesDraggable;
+  const { sheet, coarse, blockReader } = useViewportMode();
+  const nodesDraggable = useNodeDrag();
+  const stealPan = cardStealsPan({ nodeDrag: nodesDraggable, sheet, coarse });
   const dragClass = plaqueDragClass(nodesDraggable);
   const plaqueTap = usePlaqueTap(() => {
     setSelectedNodeId(id);
     if (sheet) useUiStore.getState().setPanelOpen(true);
-  }, !nodesDraggable);
+  }, sheet || coarse, nodesDraggable ? 8 : undefined);
   const selection = useTextSelection(responseRef, !isViewerMode && !sheet, nodeRef);
   const selectedText = selection.text;
   const selectionPos = selection.pos;
@@ -137,6 +140,7 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
   const openReaderAtAnchor = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!data.anchor || !anchorMaterialId) return;
+    if (blockReader) { toastMaterialDesktopHint(); return; }
     useUiStore.getState().setReaderNodeId(anchorMaterialId, { page: data.anchor.page, threadId: id });
   };
 
@@ -663,7 +667,7 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
             // keeps the wheel on the text, not the canvas zoom).
             <div
               onDoubleClick={handleDoubleClickQuestion}
-              className="text-sm text-ink font-semibold mb-3 cursor-pointer hover:bg-wash rounded-xl px-2 py-1.5 -mx-1 transition-colors max-h-[180px] overflow-y-auto nowheel nopan"
+              className={`text-sm text-ink font-semibold mb-3 cursor-pointer hover:bg-wash rounded-xl px-2 py-1.5 -mx-1 transition-colors max-h-[180px] ${stealPan ? 'overflow-y-auto nowheel nopan' : 'overflow-hidden'}`}
             >
               {data.question}
             </div>
@@ -726,7 +730,7 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
           ) : (
             <>
             {showTakeaway && (
-              <div className="px-3 py-2.5 bg-surface rounded-xl nopan mb-2" title={t('node.summaryTitle')}>
+              <div className={`px-3 py-2.5 bg-surface rounded-xl mb-2 ${stealPan ? 'nopan' : ''}`} title={t('node.summaryTitle')}>
                 <span className="text-2xs bg-wash text-ink-faint px-1.5 py-0.5 rounded-full">{t('node.summaryLabel')}</span>
                 {badge && (
                   <span title={t(badge.key as Parameters<typeof t>[0])} className={`text-2xs px-1.5 py-0.5 rounded-full ml-1.5 font-medium ${badge.cls}`}>
@@ -737,13 +741,13 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
               </div>
             )}
             {versionReasoning && (
-              <ReasoningDisclosure text={versionReasoning} />
+              <ReasoningDisclosure text={versionReasoning} stealPan={stealPan} />
             )}
             {data.response ? (
             <div
               ref={responseRef}
               onClick={handleResponseClick}
-              className={`markdown-body text-sm text-ink leading-relaxed max-h-[400px] overflow-y-auto nowheel px-3 py-2.5 bg-surface rounded-xl ${nodesDraggable ? 'cursor-text nopan nodrag' : ''}`}
+              className={`markdown-body text-sm text-ink leading-relaxed px-3 py-2.5 bg-surface rounded-xl max-h-[400px] ${stealPan ? 'overflow-y-auto nowheel cursor-text nopan nodrag' : 'overflow-hidden'}`}
             >
               {highlightedTexts.size > 0 || exploreSpecs.length > 0 ? (
                 <HighlightedMarkdown content={data.response} highlights={highlightedTexts} exploreMarks={exploreSpecs} />
@@ -914,7 +918,7 @@ export default function ThoughtNode({ id, data, height }: NodeProps<ThoughtNodeT
                   }}
                   onKeyDown={handleInputKeyDown}
                   placeholder={t('common.followUp')}
-                  className="flex-1 bg-transparent text-sm text-ink placeholder-ink-faint focus:outline-none resize-none leading-relaxed max-h-[120px] overflow-y-auto nowheel nopan nodrag"
+                  className={`flex-1 bg-transparent text-sm text-ink placeholder-ink-faint focus:outline-none resize-none leading-relaxed max-h-[120px] overflow-y-auto ${stealPan ? 'nowheel nopan nodrag' : ''}`}
                 />
                 <SearchToggles size={15} />
                 <button

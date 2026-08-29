@@ -7,8 +7,7 @@ import { isImeComposing } from '../utils';
 import { FRAME_COLORS } from '../lib/constants';
 import { useT } from '../i18n';
 import { isViewerMode } from '../lib/viewer';
-import { useViewportMode } from '../lib/use-viewport-mode';
-import { plaqueDragClass } from '../lib/use-plaque-tap';
+import { plaqueDragClass, useNodeDrag } from '../lib/use-plaque-tap';
 
 // Frame: a labeled background region — THE spatial annotation. No handles
 // (it can never be wired, so it can never touch context), ignored by
@@ -29,8 +28,7 @@ export default function FrameNode({ id, data, selected }: NodeProps<ThoughtNodeT
 
   const [editing, setEditing] = useState(!isViewerMode && !data.question);
   const [draft, setDraft] = useState(data.question);
-  const { gestures } = useViewportMode();
-  const dragClass = plaqueDragClass(gestures.nodesDraggable);
+  const dragClass = plaqueDragClass(useNodeDrag());
 
   const color = FRAME_COLORS[data.frameColor ?? 'gray'] ?? FRAME_COLORS.gray;
   // Carry: dragging the frame moves the nodes inside it. Absent = linked

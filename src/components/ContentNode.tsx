@@ -14,7 +14,8 @@ import { countTokens } from '../utils';
 import { useT, fmt } from '../i18n';
 import { isViewerMode } from '../lib/viewer';
 import { useViewportMode } from '../lib/use-viewport-mode';
-import { plaqueDragClass, usePlaqueTap } from '../lib/use-plaque-tap';
+import { plaqueDragClass, useNodeDrag, usePlaqueTap } from '../lib/use-plaque-tap';
+import { cardStealsPan } from '../lib/viewport-mode';
 import { toastMaterialDesktopHint } from '../lib/compact-ui';
 
 // Content nodes: canvas material, not turns. A note (markdown), a file
@@ -35,15 +36,24 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
   // Wiring material happens mostly from the overview — grow the handle there
   const zoomTier = useZoomTier();
   const zoomedOut = zoomTier !== 'work';
-  const { blockReader, gestures } = useViewportMode();
-  const nodesDraggable = gestures.nodesDraggable;
+  const { blockReader, sheet, coarse } = useViewportMode();
+  const nodesDraggable = useNodeDrag();
+  const stealPan = cardStealsPan({ nodeDrag: nodesDraggable, sheet, coarse });
   const dragClass = plaqueDragClass(nodesDraggable);
+  // Compact map/glyph: the whole card is the handle. Work keeps header-only
+  // so a finger on the body can pan the canvas.
+  const wholeCardDrag = nodesDraggable && (sheet || coarse);
+  const lockInnerPan = stealPan && !wholeCardDrag;
+  const openReader = (nodeId: string, jump?: { page?: number }) => {
+    if (blockReader) { toastMaterialDesktopHint(); return; }
+    useUiStore.getState().setReaderNodeId(nodeId, jump);
+  };
   const kind = data.stepKind === 'file' ? 'file' : data.stepKind === 'link' ? 'link' : 'note';
   const onContentTap = () => {
     setSelectedNodeId(id);
     if (blockReader && (kind === 'file' || kind === 'link')) toastMaterialDesktopHint();
   };
-  const plaqueTap = usePlaqueTap(onContentTap, !nodesDraggable);
+  const plaqueTap = usePlaqueTap(onContentTap, sheet || coarse, nodesDraggable ? 8 : undefined);
   const rf = useReactFlow();
   const nodePos = useStore((s) => { const n = s.nodes.find((x) => x.id === id); return n ? n.position : null; });
   // Does this material actually reach any context? 'none' and 'quote' are
@@ -106,8 +116,7 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
   const openClipSource = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!clipAnchor || !clipSourceId) return;
-    if (blockReader) { toastMaterialDesktopHint(); return; }
-    useUiStore.getState().setReaderNodeId(clipSourceId, { page: clipAnchor.page });
+    openReader(clipSourceId, { page: clipAnchor.page });
   };
   const linkDomain = (() => { try { return new URL(data.linkUrl ?? '').hostname; } catch { return data.linkUrl ?? ''; } })();
 
@@ -132,9 +141,8 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
         onPointerCancel={plaqueTap.onPointerCancel}
         onDoubleClick={(e) => {
           e.stopPropagation();
-          if (!nodesDraggable) return;
           // documents open where they are read; notes zoom to working scale
-          if (kind === 'file' || kind === 'link') useUiStore.getState().setReaderNodeId(id);
+          if (kind === 'file' || kind === 'link') openReader(id);
           else rf.setCenter((nodePos?.x ?? 0) + 200, (nodePos?.y ?? 0) + 120, { zoom: 1, duration: 300 });
         }}
         title={`${t(kind === 'file' ? 'glyph.file' : kind === 'link' ? 'glyph.link' : 'glyph.note')}\n${kind === 'file' ? (attachments[0]?.name ?? '') : kind === 'link' ? (data.linkTitle || data.linkUrl || '') : data.question.replace(/\s+/g, ' ').slice(0, 120)}`}>
@@ -164,16 +172,15 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
   return (
     <div
       className={`content-card w-full h-full min-w-[340px] flex flex-col rounded-xl shadow-sm border-2 animate-fade-in transition-colors duration-200 ${
-        kind === 'note' ? 'bg-amber-50/90 border-amber-200' : 'bg-card border-line'
-      } ${selectedNodeId === id ? 'ring-2 ring-accent selected-glow' : ''}`}
+        wholeCardDrag ? dragClass : ''
+      }${kind === 'note' ? 'bg-amber-50/90 border-amber-200' : 'bg-card border-line'} ${selectedNodeId === id ? 'ring-2 ring-accent selected-glow' : ''}`}
       onClick={() => { if (nodesDraggable) setSelectedNodeId(id); }}
       onPointerDown={plaqueTap.onPointerDown}
       onPointerUp={plaqueTap.onPointerUp}
       onPointerCancel={plaqueTap.onPointerCancel}
       onDoubleClick={() => {
-        if (!nodesDraggable) return;
         // notes keep dblclick=edit (on the body); files and links open the reader
-        if (kind !== 'note') useUiStore.getState().setReaderNodeId(id);
+        if (kind !== 'note') openReader(id);
       }}
       onDrop={async (e) => {
         if (kind !== 'file' || isViewerMode) return;
@@ -186,7 +193,7 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
       {/* Pure source: material feeds context, nothing flows INTO it — hence no target handle. */}
 
       {/* header: drag handle + identity + linked state + delete */}
-      <div className={`flex items-center justify-between px-4 py-2 border-b shrink-0 ${dragClass}${kind === 'note' ? 'border-amber-200/70' : 'border-line/70'}`}>
+      <div className={`flex items-center justify-between px-4 py-2 border-b shrink-0 ${wholeCardDrag ? '' : dragClass}${kind === 'note' ? 'border-amber-200/70' : 'border-line/70'}`}>
         <div className="flex items-center gap-2 min-w-0">
           {headerIcon}
           {kind === 'link'
@@ -212,8 +219,7 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (blockReader) { toastMaterialDesktopHint(); return; }
-              useUiStore.getState().setReaderNodeId(id);
+              openReader(id);
             }}
             title={t('reader.open')}
             className="text-ink-faint hover:text-accent rounded-full w-6 h-6 flex items-center justify-center transition-colors"
@@ -243,7 +249,7 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
 
       {/* Body: grows with content by default; when the card is resized the
           body becomes the scroll region (wheel scrolls text, not zoom) */}
-      <div className="px-4 py-3 nodrag flex-1 min-h-0 overflow-y-auto nowheel">
+      <div className={`px-4 py-3 flex-1 min-h-0${wholeCardDrag ? '' : ' nodrag'}${lockInnerPan ? ' overflow-y-auto nowheel' : ' max-h-[400px] overflow-hidden'}`}>
         {kind === 'note' && (
           editing ? (
             <textarea
@@ -254,12 +260,12 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
               placeholder={t('content.notePlaceholder')}
               rows={5}
               autoFocus
-              className="w-full h-full min-h-[7rem] bg-transparent text-sm text-ink resize-none focus:outline-none placeholder-ink-faint leading-relaxed nopan nowheel"
+              className={`w-full h-full min-h-[7rem] bg-transparent text-sm text-ink resize-none focus:outline-none placeholder-ink-faint leading-relaxed ${lockInnerPan ? 'nopan nowheel' : ''}`}
             />
           ) : (
             <div
               onDoubleClick={() => { if (isViewerMode) return; setDraft(data.question); setEditing(true); }}
-              className="markdown-body text-sm text-ink leading-relaxed cursor-text nopan"
+              className={`markdown-body text-sm text-ink leading-relaxed cursor-text ${lockInnerPan ? 'nopan' : ''}`}
               title={t('content.noteEditTitle')}
             >
               {data.question
@@ -288,7 +294,7 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
                 </button>
               )}
               {data.question && (
-                <div className="text-xs text-ink-muted leading-relaxed max-h-[200px] overflow-y-auto nopan nowheel whitespace-pre-wrap">
+                <div className={`text-xs text-ink-muted leading-relaxed whitespace-pre-wrap ${lockInnerPan ? 'max-h-[200px] overflow-y-auto nopan nowheel' : ''}`}>
                   {data.question.slice(0, 1200)}{data.question.length > 1200 ? '…' : ''}
                 </div>
               )}
@@ -354,7 +360,7 @@ export default function ContentNode({ id, data, selected, height }: NodeProps<Th
                           }
                         }}
                         rows={7}
-                        className="w-full text-xs text-ink bg-surface border border-line rounded-lg px-2.5 py-2 focus:outline-none focus:ring-1 focus:ring-accent/40 resize-y leading-relaxed nopan nowheel"
+                        className={`w-full text-xs text-ink bg-surface border border-line rounded-lg px-2.5 py-2 focus:outline-none focus:ring-1 focus:ring-accent/40 resize-y leading-relaxed ${lockInnerPan ? 'nopan nowheel' : ''}`}
                       />
                       <div className="flex items-center justify-between">
                         <span className="text-2xs text-ink-faint font-mono">{att.extractedBy}</span>

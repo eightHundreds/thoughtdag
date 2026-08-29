@@ -81,6 +81,27 @@ export function gesturePolicy(input: {
   };
 }
 
+/** Compact (sheet / coarse): plaques and glyphs drag the node; a work card
+ *  fills the phone, so a finger there pans the canvas. Desktop always drags
+ *  nodes. Viewer never does. */
+export function nodeDragEnabled(input: {
+  isViewer: boolean;
+  sheet: boolean;
+  coarse: boolean;
+  zoomTier: 'work' | 'map' | 'glyph';
+}): boolean {
+  if (input.isViewer) return false;
+  if (!(input.sheet || input.coarse)) return true;
+  return input.zoomTier !== 'work';
+}
+
+/** Inner `nopan` / overflow-scroll steal one-finger pan. Compact work
+ *  cards must not: they fill the phone, so the finger has to move the
+ *  canvas. Desktop and compact map still lock pan on the card. */
+export function cardStealsPan(input: { nodeDrag: boolean; sheet: boolean; coarse: boolean }): boolean {
+  return input.nodeDrag || !(input.sheet || input.coarse);
+}
+
 export function toolbarRightPx(sheet: boolean, panelOpen: boolean, panelWidth: number): number {
   if (sheet || !panelOpen) return 16;
   return panelWidth + PANEL_INSET + 12;

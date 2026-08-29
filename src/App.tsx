@@ -81,6 +81,7 @@ import { useT, t as ti, fmt, useI18n } from './i18n';
 import { isViewerMode, buildViewerLink } from './lib/viewer';
 import { useModels } from './lib/use-models';
 import { getZoomTier, useZoomTier } from './lib/use-map-mode';
+import { useNodeDrag } from './lib/use-plaque-tap';
 import { TimelineBar } from './components/ui/TimelineBar';
 import TimelineOverviewModal from './components/ui/TimelineOverviewModal';
 import { useStore as useRfStore, useReactFlow } from '@xyflow/react';
@@ -193,6 +194,7 @@ function Canvas() {
   const t = useT();
   const vp = useViewportMode();
   const { sheet, narrowChrome, blockReader, coarse, gestures } = vp;
+  const nodeDrag = useNodeDrag();
   const setTutorialOpen = useUiStore((s) => s.setTutorialOpen);
   const annotationsHidden = useUiStore((s) => s.annotationsHidden);
   const setAnnotationsHidden = useUiStore((s) => s.setAnnotationsHidden);
@@ -741,6 +743,9 @@ function Canvas() {
   const selectedKind = nodes.find((nd) => nd.id === selectedNodeId)?.data.stepKind;
   const selectedIsContent = !isThoughtCard(selectedKind);
   const panelOpen = panelMode && !!selectedNodeId && !isParadigm && !selectedIsContent;
+  // Coarse overlay: tap only selects; a toolbar control is the second action
+  // that opens the reading surface (dblclick is not a coarse gesture).
+  const showOpenPanel = coarse && !sheet && !!selectedNodeId && !selectedIsContent && !isParadigm && !panelOpen;
   const multiSelected = selectedNodeIds.length > 1;
   const batchDelete = useStore((s) => s.batchDelete);
 
@@ -1180,11 +1185,11 @@ function Canvas() {
         snapToGrid={paperTexture === 'grid'}
         snapGrid={[22, 22]}
         proOptions={{ hideAttribution: true }}
-        nodeDragThreshold={5}
+        nodeDragThreshold={sheet || coarse ? 8 : 5}
         connectionRadius={40}
         selectionMode={SelectionMode.Partial}
         selectionOnDrag={gestures.selectionOnDrag}
-        nodesDraggable={gestures.nodesDraggable}
+        nodesDraggable={nodeDrag}
         nodesConnectable={gestures.nodesConnectable}
         panOnDrag={gestures.panOnDrag}
         panOnScroll={gestures.panOnScroll}
@@ -1572,6 +1577,16 @@ function Canvas() {
           >
             <Search size={15} strokeWidth={1.75} />
           </button>
+          {showOpenPanel && (
+            <button
+              onClick={() => useUiStore.getState().setPanelOpen(true)}
+              className="bg-card/90 backdrop-blur border border-line rounded-lg w-8 h-8 flex items-center justify-center shadow-sm hover:bg-wash transition-colors text-ink-muted hover:text-accent"
+              title={t('ctx.openPanel')}
+              data-open-panel
+            >
+              <BookOpen size={15} strokeWidth={1.75} />
+            </button>
+          )}
           <LangSwitch />
           <button
             onClick={() => exportActiveProjectJson()}
@@ -1701,6 +1716,16 @@ function Canvas() {
             data-search-entry
           >
             <Search size={15} strokeWidth={1.75} />
+          </button>
+        )}
+        {showOpenPanel && (
+          <button
+            onClick={() => useUiStore.getState().setPanelOpen(true)}
+            className="bg-card/90 backdrop-blur border border-line rounded-lg w-8 h-8 flex items-center justify-center shadow-sm hover:bg-wash transition-colors text-ink-faint hover:text-accent"
+            title={t('ctx.openPanel')}
+            data-open-panel
+          >
+            <BookOpen size={15} strokeWidth={1.75} />
           </button>
         )}
         <LangSwitch />

@@ -1,3 +1,4 @@
+import { useEffect, useSyncExternalStore } from 'react';
 import { useStore as useRfStore } from '@xyflow/react';
 import { GLYPH_ENTER, GLYPH_LEAVE, workFoldAt, workUnfoldAt } from './map-tier';
 import { useViewportMode } from './use-viewport-mode';
@@ -32,6 +33,13 @@ export {
 export type ZoomTier = 'work' | 'map' | 'glyph';
 
 let canvasTier: ZoomTier = 'work';
+const tierListeners = new Set<() => void>();
+
+function publishTier(next: ZoomTier) {
+  if (next === canvasTier) return;
+  canvasTier = next;
+  tierListeners.forEach((l) => l());
+}
 
 function stepTier(z: number, cur: ZoomTier, fold: number, unfold: number): ZoomTier {
   if (cur === 'work') {
@@ -58,19 +66,32 @@ function liveWidth(): number {
 export function getZoomTier(z?: number): ZoomTier {
   if (typeof z === 'number') {
     const w = liveWidth();
-    canvasTier = stepTier(z, canvasTier, workFoldAt(w), workUnfoldAt(w));
+    publishTier(stepTier(z, canvasTier, workFoldAt(w), workUnfoldAt(w)));
   }
   return canvasTier;
+}
+
+/** Zoom tier without React Flow context (App chrome, gesture flags). */
+export function usePublishedZoomTier(): ZoomTier {
+  return useSyncExternalStore(
+    (cb) => {
+      tierListeners.add(cb);
+      return () => { tierListeners.delete(cb); };
+    },
+    () => canvasTier,
+  );
 }
 
 export function useZoomTier(): ZoomTier {
   const innerWidth = useViewportMode().innerWidth;
   const fold = workFoldAt(innerWidth);
   const unfold = workUnfoldAt(innerWidth);
-  return useRfStore((s) => {
+  const tier = useRfStore((s) => {
     canvasTier = stepTier(s.transform[2], canvasTier, fold, unfold);
     return canvasTier;
   });
+  useEffect(() => { publishTier(tier); }, [tier]);
+  return tier;
 }
 
 /** Legacy boolean view: true whenever cards are folded (map OR glyph). */

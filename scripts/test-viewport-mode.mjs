@@ -8,6 +8,8 @@ import {
   narrowChromeAt,
   wheelPanPreferred,
   gesturePolicy,
+  nodeDragEnabled,
+  cardStealsPan,
   clampMapLandingZoom,
   worldAtScreenCenter,
   toolbarRightPx,
@@ -106,6 +108,21 @@ test('gesturePolicy: viewer and sheet pan the pane, not the node', () => {
   assert.equal(desktop.panOnScroll, true);
   assert.equal(desktop.zoomOnScroll, false);
   assert.equal(desktop.initialFitView, true);
+});
+
+test('nodeDragEnabled: compact map/glyph drag the card; work pans the canvas', () => {
+  const phone = { isViewer: false, sheet: true, coarse: true };
+  assert.equal(nodeDragEnabled({ ...phone, zoomTier: 'work' }), false);
+  assert.equal(nodeDragEnabled({ ...phone, zoomTier: 'map' }), true);
+  assert.equal(nodeDragEnabled({ ...phone, zoomTier: 'glyph' }), true);
+  assert.equal(nodeDragEnabled({ isViewer: true, sheet: true, coarse: true, zoomTier: 'map' }), false);
+  assert.equal(nodeDragEnabled({ isViewer: false, sheet: false, coarse: false, zoomTier: 'work' }), true);
+});
+
+test('cardStealsPan: compact work lets the canvas move; desktop and map lock it', () => {
+  assert.equal(cardStealsPan({ nodeDrag: false, sheet: true, coarse: true }), false);
+  assert.equal(cardStealsPan({ nodeDrag: true, sheet: true, coarse: true }), true);
+  assert.equal(cardStealsPan({ nodeDrag: true, sheet: false, coarse: false }), true);
 });
 
 test('toolbarRightPx: sheet and closed overlay hug the edge', () => {

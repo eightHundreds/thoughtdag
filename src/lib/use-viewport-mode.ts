@@ -41,10 +41,20 @@ export function getViewportMode(): ViewportMode {
   return live;
 }
 
-function readMode(innerWidth: number, panelWidth: number): ViewportMode {
-  const coarse = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
-  const hoverFine = typeof window !== 'undefined'
-    && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+function readPointerFlags(): { coarse: boolean; hoverFine: boolean } {
+  if (typeof window === 'undefined') return { coarse: false, hoverFine: true };
+  return {
+    coarse: window.matchMedia('(pointer: coarse)').matches,
+    hoverFine: window.matchMedia('(hover: hover) and (pointer: fine)').matches,
+  };
+}
+
+function readMode(
+  innerWidth: number,
+  panelWidth: number,
+  coarse: boolean,
+  hoverFine: boolean,
+): ViewportMode {
   const uaMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent);
   const wheelPan = wheelPanPreferred({ hoverFine, pointerCoarse: coarse, uaMac });
   const narrowChrome = narrowChromeAt(innerWidth);
@@ -62,24 +72,37 @@ function useViewportModeState(): ViewportMode {
   const [innerWidth, setInnerWidth] = useState(() =>
     typeof window === 'undefined' ? 1440 : window.innerWidth,
   );
+  const [pointer, setPointer] = useState(readPointerFlags);
 
   useEffect(() => {
     const onResize = () => setInnerWidth(window.innerWidth);
+    const onPointer = () => {
+      const next = readPointerFlags();
+      setPointer((prev) =>
+        prev.coarse === next.coarse && prev.hoverFine === next.hoverFine ? prev : next,
+      );
+    };
     window.addEventListener('resize', onResize);
-    const mqls = [
-      window.matchMedia('(max-width: 959px)'),
-      window.matchMedia('(pointer: coarse)'),
-      window.matchMedia('(hover: hover) and (pointer: fine)'),
-    ];
-    for (const m of mqls) m.addEventListener('change', onResize);
+    const widthMq = window.matchMedia('(max-width: 959px)');
+    const coarseMq = window.matchMedia('(pointer: coarse)');
+    const hoverMq = window.matchMedia('(hover: hover) and (pointer: fine)');
+    widthMq.addEventListener('change', onResize);
+    coarseMq.addEventListener('change', onPointer);
+    hoverMq.addEventListener('change', onPointer);
     onResize();
+    onPointer();
     return () => {
       window.removeEventListener('resize', onResize);
-      for (const m of mqls) m.removeEventListener('change', onResize);
+      widthMq.removeEventListener('change', onResize);
+      coarseMq.removeEventListener('change', onPointer);
+      hoverMq.removeEventListener('change', onPointer);
     };
   }, []);
 
-  const mode = useMemo(() => readMode(innerWidth, panelWidth), [innerWidth, panelWidth]);
+  const mode = useMemo(
+    () => readMode(innerWidth, panelWidth, pointer.coarse, pointer.hoverFine),
+    [innerWidth, panelWidth, pointer.coarse, pointer.hoverFine],
+  );
 
   useEffect(() => {
     live = mode;

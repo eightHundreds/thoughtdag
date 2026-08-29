@@ -5,8 +5,7 @@ import { useStore } from '../store';
 import { effectiveRoles } from '../lib/role-templates';
 import { useUiStore } from '../lib/ui-store';
 import { useI18n, useT } from '../i18n';
-import { useViewportMode } from '../lib/use-viewport-mode';
-import { plaqueDragClass } from '../lib/use-plaque-tap';
+import { plaqueDragClass, useNodeDrag } from '../lib/use-plaque-tap';
 
 // Orchestration-view card. A paradigm has exactly two node kinds:
 //   human  — a dialogue turn: the human asks here. The card holds optional
@@ -38,8 +37,7 @@ export default function ParadigmNode({ id, data }: NodeProps<ThoughtNodeType>) {
     }));
   };
   const kind: 'human' | 'prompt' = data.stepKind === 'human' ? 'human' : 'prompt';
-  const { gestures } = useViewportMode();
-  const dragClass = plaqueDragClass(gestures.nodesDraggable);
+  const dragClass = plaqueDragClass(useNodeDrag());
 
   return (
     <div className={`bg-card border-2 border-dashed rounded-xl w-[440px] shadow-sm ${KIND_STYLES[kind]}`}>
