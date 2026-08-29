@@ -3,7 +3,7 @@ import {
   useProjects, registerProject, deleteProject,
   loadProjectState, saveProjectState,
 } from '../store/projects';
-import { decideProjectSync } from './sync-decision';
+import { decideProjectSync, projectHashSource } from './sync-decision';
 import { flushPendingWrites } from './persistence';
 import { internNodes } from './attachment-vault';
 import { toast, useUiStore } from './ui-store';
@@ -113,7 +113,7 @@ export function rememberDeletedProject(id: string): void {
   if (!loadSyncConfig()) return;
   const rec = loadRecords()[id];
   if (!rec) saveRecord(id, { hash: 'deleted', updatedAt: Date.now() });
-  schedule({ soon: true });
+  scheduleRemoteSync({ soon: true });
 }
 
 export function lastRemoteSyncAt(): number | null {
@@ -532,13 +532,13 @@ async function putPrefs(
   }
 }
 
-async function localHashOf(graph: GraphState | null): Promise<string> {
+async function localHashOf(graph: GraphState | null, name: string): Promise<string> {
   if (!graph) return '';
-  return hashPayload({
+  return hashPayload(projectHashSource({
     nodes: slimAttachments(graph.nodes),
     edges: graph.edges,
     events: graph.events ?? [],
-  });
+  }, name));
 }
 
 async function syncProject(
@@ -550,7 +550,7 @@ async function syncProject(
 ): Promise<'pull' | 'push' | 'conflict' | 'same' | 'deleted'> {
   const localMeta = useProjects.getState().projects.find((p) => p.id === id);
   const graph = await readLocalGraph(id);
-  const localHash = await localHashOf(graph);
+  const localHash = await localHashOf(graph, localMeta?.name ?? '');
   const last = loadRecords()[id];
   let remoteHash = info.hash || '';
   if (!remoteHash) {
@@ -601,7 +601,8 @@ async function syncLocalOnly(
   id: string,
 ): Promise<'push' | 'same' | 'deleted'> {
   const graph = await readLocalGraph(id);
-  const localHash = await localHashOf(graph);
+  const name = useProjects.getState().projects.find((p) => p.id === id)?.name ?? '';
+  const localHash = await localHashOf(graph, name);
   const last = loadRecords()[id];
   const action = decideProjectSync({
     localExists: true,
@@ -642,7 +643,9 @@ async function pushProject(
   const graph = await readLocalGraph(id);
   if (!graph || !meta) return;
   const nodes = slimAttachments(graph.nodes);
-  const hash = await hashPayload({ nodes, edges: graph.edges, events: graph.events ?? [] });
+  const hash = await hashPayload(projectHashSource({
+    nodes, edges: graph.edges, events: graph.events ?? [],
+  }, meta.name));
   const snap: ProjectSnapshot = {
     version: 1,
     kind: 'project',
@@ -672,7 +675,7 @@ let watching = false;
 
 const DELETE_DEBOUNCE_MS = 1500;
 
-function schedule(opts?: { soon?: boolean }): void {
+export function scheduleRemoteSync(opts?: { soon?: boolean }): void {
   if (!loadSyncConfig()) return;
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
@@ -690,7 +693,7 @@ export function bootRemoteSync(): void {
   if (!watching) {
     watching = true;
     useStore.subscribe((state, prev) => {
-      if (state.nodes !== prev.nodes || state.edges !== prev.edges) schedule();
+      if (state.nodes !== prev.nodes || state.edges !== prev.edges) scheduleRemoteSync();
     });
   }
   void syncNow({ silent: true }).catch((err) => {

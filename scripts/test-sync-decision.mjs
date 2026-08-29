@@ -2,7 +2,7 @@
 // local edits are not discarded. Run via `npm test`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideProjectSync } from '../src/lib/sync-decision.ts';
+import { decideProjectSync, projectHashSource } from '../src/lib/sync-decision.ts';
 
 const base = {
   localExists: true,
@@ -15,6 +15,16 @@ const base = {
 
 test('same hash on both sides is a no-op', () => {
   assert.equal(decideProjectSync(base), 'same');
+});
+
+test('canvas hash source includes the title so a rename is an edit', () => {
+  const graph = { nodes: [{ id: 'a' }], edges: [], events: [] };
+  const a = projectHashSource(graph, 'My Canvas');
+  const b = projectHashSource(graph, 'Renamed');
+  assert.equal(a.name, 'My Canvas');
+  assert.notDeepEqual(a, b);
+  assert.deepEqual(a.nodes, b.nodes);
+  assert.equal(decideProjectSync({ ...base, localHash: JSON.stringify(b) }), 'push');
 });
 
 test('node deletions on this computer push the smaller graph', () => {

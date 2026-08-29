@@ -133,10 +133,19 @@ export async function createProject(name = 'Untitled', kind: 'chat' | 'paradigm'
 }
 
 export async function renameProject(id: string, name: string): Promise<void> {
+  const current = useProjects.getState().projects.find((p) => p.id === id);
+  if (!current || current.name === name) return;
+  const now = Date.now();
   useProjects.setState((s) => ({
-    projects: s.projects.map((p) => (p.id === id ? { ...p, name } : p)),
+    projects: s.projects.map((p) => (p.id === id ? { ...p, name, updatedAt: now } : p)),
   }));
   await saveMeta();
+  // Title lives in project meta, not the graph — the vault watcher only
+  // sees nodes/edges, so a rename has to enqueue sync itself.
+  try {
+    const { scheduleRemoteSync } = await import('../lib/remote-sync');
+    scheduleRemoteSync();
+  } catch { /* remote-sync is optional at boot */ }
 }
 
 /** Graph of a canvas without switching to it. Active project reads live

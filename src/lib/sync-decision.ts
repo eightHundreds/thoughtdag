@@ -20,6 +20,20 @@ export interface ProjectSyncInput {
   remoteHash: string;
 }
 
+/** Body hashed for vault equality. Title is in here so a rename still
+ *  pushes; `updatedAt` is not (bookkeeping must not look like an edit). */
+export function projectHashSource(
+  graph: { nodes: unknown; edges: unknown; events?: unknown },
+  name: string,
+) {
+  return {
+    nodes: graph.nodes,
+    edges: graph.edges,
+    events: graph.events ?? [],
+    name,
+  };
+}
+
 export function decideProjectSync(p: ProjectSyncInput): ProjectSyncAction {
   if (p.remoteExists && !p.localExists) {
     // We used to have this id (a last hash) and the user deleted the
